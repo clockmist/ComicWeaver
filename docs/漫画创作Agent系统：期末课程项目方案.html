@@ -1,0 +1,2209 @@
+<!DOCTYPE html>
+<!-- saved from url=(0065)https://www.kimi.com/preview/19e221bb-fba2-8209-8000-051da1b0177b -->
+<html lang="zh-CN"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>漫画创作Agent系统：期末课程项目方案</title>
+    <script src="./漫画创作Agent系统：期末课程项目方案_files/saved_resource"></script>
+    <link href="./漫画创作Agent系统：期末课程项目方案_files/css2" rel="stylesheet">
+    <link rel="stylesheet" href="./漫画创作Agent系统：期末课程项目方案_files/all.min.css">
+    <script src="./漫画创作Agent系统：期末课程项目方案_files/mermaid.min.js.下载"></script>
+    <style>
+        :root {
+            --primary: #1e40af;
+            --secondary: #64748b;
+            --accent: #f59e0b;
+            --surface: #f8fafc;
+            --text: #334155;
+            --text-muted: #64748b;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            line-height: 1.7;
+            color: var(--text);
+            overflow-x: hidden; /* Prevent horizontal overflow */
+        }
+        
+        .font-display {
+            font-family: 'Playfair Display', serif;
+        }
+        
+        .hero-title {
+            font-family: 'Playfair Display', serif;
+            font-style: italic;
+            font-weight: 600;
+            font-size: clamp(2.5rem, 5vw, 4rem);
+            line-height: 1.1;
+            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 50%, #60a5fa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .toc-fixed {
+            position: fixed;
+            top: 2rem;
+            left: 2rem;
+            width: 280px;
+            max-height: calc(100vh - 4rem);
+            overflow-y: auto;
+            z-index: 50;
+            background: rgba(248, 250, 252, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+        
+        .main-content {
+            margin-left: 320px;
+            max-width: calc(100vw - 360px);
+            padding: 2rem;
+        }
+        
+        .section-divider {
+            height: 2px;
+            background: linear-gradient(90deg, var(--accent) 0%, transparent 100%);
+            margin: 3rem 0;
+        }
+        
+        .citation {
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 500;
+            border-bottom: 1px dotted var(--primary);
+        }
+        
+        .citation:hover {
+            background-color: rgba(30, 64, 175, 0.1);
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+        
+        .highlight-box {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border-left: 4px solid var(--accent);
+            padding: 1.5rem;
+            margin: 2rem 0;
+            border-radius: 8px;
+        }
+        
+        .tech-card {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+        }
+        
+        .tech-card:hover {
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+            transform: translateY(-2px);
+        }
+        
+        .bento-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            margin: 2rem 0;
+        }
+        
+        .bento-item {
+            background: white;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        }
+        
+        .mermaid-container {
+            display: flex;
+            justify-content: center;
+            min-height: 300px;
+            max-height: 800px;
+            background: #ffffff;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 30px;
+            margin: 30px 0;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.08);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .mermaid-container .mermaid {
+            width: 100%;
+            max-width: 100%;
+            height: 100%;
+            cursor: grab;
+            transition: transform 0.3s ease;
+            transform-origin: center center;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            touch-action: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+
+        .mermaid-container .mermaid svg {
+            max-width: 100%;
+            height: 100%;
+            display: block;
+            margin: 0 auto;
+        }
+
+        .mermaid-container .mermaid:active {
+            cursor: grabbing;
+        }
+
+        .mermaid-container.zoomed .mermaid {
+            height: 100%;
+            width: 100%;
+            cursor: grab;
+        }
+
+        .mermaid-controls {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            display: flex;
+            gap: 10px;
+            z-index: 20;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 8px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .mermaid-control-btn {
+            background: #ffffff;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            padding: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: #374151;
+            font-size: 14px;
+            min-width: 36px;
+            height: 36px;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .mermaid-control-btn:hover {
+            background: #f8fafc;
+            border-color: #3b82f6;
+            color: #3b82f6;
+            transform: translateY(-1px);
+        }
+
+        .mermaid-control-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* Enhanced mermaid styling for better contrast and consistency */
+        .mermaid .node rect,
+        .mermaid .node circle,
+        .mermaid .node ellipse,
+        .mermaid .node polygon {
+            stroke-width: 2px;
+        }
+        
+        .mermaid .node .label {
+            color: var(--text) !important;
+            font-weight: 500 !important;
+            font-size: 14px !important;
+        }
+        
+        .mermaid .edgePath .path {
+            stroke: var(--secondary) !important;
+            stroke-width: 2px;
+        }
+        
+        .mermaid .edgeLabel {
+            background-color: white !important;
+            color: var(--text) !important;
+            font-size: 12px !important;
+            font-weight: 500 !important;
+        }
+
+        /* Improve contrast for different node colors */
+        .mermaid .node[style*="fill:#e3f2fd"] .label,
+        .mermaid .node[style*="fill:#f3e5f5"] .label,
+        .mermaid .node[style*="fill:#e8f5e8"] .label,
+        .mermaid .node[style*="fill:#fff3e0"] .label,
+        .mermaid .node[style*="fill:#fce4ec"] .label {
+            color: #1a1a1a !important;
+            font-weight: 600 !important;
+        }
+
+        .mermaid .node[style*="fill:#1e40af"] .label,
+        .mermaid .node[style*="fill:#059669"] .label,
+        .mermaid .node[style*="fill:#dc2626"] .label {
+            color: white !important;
+            font-weight: 600 !important;
+        }
+
+        /* Timeline specific styling */
+        .mermaid .section {
+            fill: var(--surface) !important;
+            stroke: var(--secondary) !important;
+            stroke-width: 1px;
+        }
+        
+        .mermaid .section0, .mermaid .section1, .mermaid .section2, .mermaid .section3 {
+            fill: var(--surface) !important;
+        }
+        
+        .mermaid .cScale0, .mermaid .cScale1, .mermaid .cScale2, .mermaid .cScale3 {
+            fill: var(--primary) !important;
+        }
+        
+        .mermaid text {
+            fill: var(--text) !important;
+            font-family: 'Inter', sans-serif !important;
+        }
+        
+        /* Responsive adjustments */
+        @media (max-width: 1280px) {
+            .toc-fixed {
+                position: relative;
+                width: 100%;
+                margin-bottom: 2rem;
+            }
+            .main-content {
+                margin-left: 0;
+                max-width: 100%;
+            }
+        }
+        
+        @media (max-width: 1024px) {
+            .toc-fixed {
+                display: none;
+            }
+            .main-content {
+                margin-left: 0;
+                max-width: 100%;
+                padding: 1rem;
+            }
+            .bento-grid {
+                grid-template-columns: 1fr;
+            }
+            .mermaid-control-btn:not(.reset-zoom) {
+                display: none;
+            }
+            .mermaid-controls {
+                top: auto;
+                bottom: 15px;
+                right: 15px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                padding: 0.5rem;
+            }
+            .hero-title {
+                font-size: clamp(1.8rem, 6vw, 2.5rem);
+            }
+            .bento-item img {
+                height: auto;
+                max-height: 200px;
+            }
+            .bento-item {
+                padding: 1rem;
+            }
+            .highlight-box,
+            .tech-card,
+            .bento-item {
+                padding: 1rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .main-content {
+                padding: 0.25rem;
+            }
+            .hero-title {
+                font-size: clamp(1.5rem, 6vw, 2rem);
+            }
+            .bento-item img {
+                height: auto;
+                max-height: 150px;
+            }
+        }
+    </style>
+  <!--<base target="_blank">--><base href="." target="_blank">
+<script src="./漫画创作Agent系统：期末课程项目方案_files/sdk-seed.js.下载" defer="" data-brand="dr"></script>
+<style>*, ::before, ::after{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-rotate:0;--tw-skew-x:0;--tw-skew-y:0;--tw-scale-x:1;--tw-scale-y:1;--tw-pan-x: ;--tw-pan-y: ;--tw-pinch-zoom: ;--tw-scroll-snap-strictness:proximity;--tw-gradient-from-position: ;--tw-gradient-via-position: ;--tw-gradient-to-position: ;--tw-ordinal: ;--tw-slashed-zero: ;--tw-numeric-figure: ;--tw-numeric-spacing: ;--tw-numeric-fraction: ;--tw-ring-inset: ;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-color:rgb(59 130 246 / 0.5);--tw-ring-offset-shadow:0 0 #0000;--tw-ring-shadow:0 0 #0000;--tw-shadow:0 0 #0000;--tw-shadow-colored:0 0 #0000;--tw-blur: ;--tw-brightness: ;--tw-contrast: ;--tw-grayscale: ;--tw-hue-rotate: ;--tw-invert: ;--tw-saturate: ;--tw-sepia: ;--tw-drop-shadow: ;--tw-backdrop-blur: ;--tw-backdrop-brightness: ;--tw-backdrop-contrast: ;--tw-backdrop-grayscale: ;--tw-backdrop-hue-rotate: ;--tw-backdrop-invert: ;--tw-backdrop-opacity: ;--tw-backdrop-saturate: ;--tw-backdrop-sepia: ;--tw-contain-size: ;--tw-contain-layout: ;--tw-contain-paint: ;--tw-contain-style: }::backdrop{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-rotate:0;--tw-skew-x:0;--tw-skew-y:0;--tw-scale-x:1;--tw-scale-y:1;--tw-pan-x: ;--tw-pan-y: ;--tw-pinch-zoom: ;--tw-scroll-snap-strictness:proximity;--tw-gradient-from-position: ;--tw-gradient-via-position: ;--tw-gradient-to-position: ;--tw-ordinal: ;--tw-slashed-zero: ;--tw-numeric-figure: ;--tw-numeric-spacing: ;--tw-numeric-fraction: ;--tw-ring-inset: ;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-color:rgb(59 130 246 / 0.5);--tw-ring-offset-shadow:0 0 #0000;--tw-ring-shadow:0 0 #0000;--tw-shadow:0 0 #0000;--tw-shadow-colored:0 0 #0000;--tw-blur: ;--tw-brightness: ;--tw-contrast: ;--tw-grayscale: ;--tw-hue-rotate: ;--tw-invert: ;--tw-saturate: ;--tw-sepia: ;--tw-drop-shadow: ;--tw-backdrop-blur: ;--tw-backdrop-brightness: ;--tw-backdrop-contrast: ;--tw-backdrop-grayscale: ;--tw-backdrop-hue-rotate: ;--tw-backdrop-invert: ;--tw-backdrop-opacity: ;--tw-backdrop-saturate: ;--tw-backdrop-sepia: ;--tw-contain-size: ;--tw-contain-layout: ;--tw-contain-paint: ;--tw-contain-style: }/* ! tailwindcss v3.4.17 | MIT License | https://tailwindcss.com */*,::after,::before{box-sizing:border-box;border-width:0;border-style:solid;border-color:#e5e7eb}::after,::before{--tw-content:''}:host,html{line-height:1.5;-webkit-text-size-adjust:100%;-moz-tab-size:4;tab-size:4;font-family:ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";font-feature-settings:normal;font-variation-settings:normal;-webkit-tap-highlight-color:transparent}body{margin:0;line-height:inherit}hr{height:0;color:inherit;border-top-width:1px}abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}a{color:inherit;text-decoration:inherit}b,strong{font-weight:bolder}code,kbd,pre,samp{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;font-feature-settings:normal;font-variation-settings:normal;font-size:1em}small{font-size:80%}sub,sup{font-size:75%;line-height:0;position:relative;vertical-align:baseline}sub{bottom:-.25em}sup{top:-.5em}table{text-indent:0;border-color:inherit;border-collapse:collapse}button,input,optgroup,select,textarea{font-family:inherit;font-feature-settings:inherit;font-variation-settings:inherit;font-size:100%;font-weight:inherit;line-height:inherit;letter-spacing:inherit;color:inherit;margin:0;padding:0}button,select{text-transform:none}button,input:where([type=button]),input:where([type=reset]),input:where([type=submit]){-webkit-appearance:button;background-color:transparent;background-image:none}:-moz-focusring{outline:auto}:-moz-ui-invalid{box-shadow:none}progress{vertical-align:baseline}::-webkit-inner-spin-button,::-webkit-outer-spin-button{height:auto}[type=search]{-webkit-appearance:textfield;outline-offset:-2px}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-file-upload-button{-webkit-appearance:button;font:inherit}summary{display:list-item}blockquote,dd,dl,figure,h1,h2,h3,h4,h5,h6,hr,p,pre{margin:0}fieldset{margin:0;padding:0}legend{padding:0}menu,ol,ul{list-style:none;margin:0;padding:0}dialog{padding:0}textarea{resize:vertical}input::placeholder,textarea::placeholder{opacity:1;color:#9ca3af}[role=button],button{cursor:pointer}:disabled{cursor:default}audio,canvas,embed,iframe,img,object,svg,video{display:block;vertical-align:middle}img,video{max-width:100%;height:auto}[hidden]:where(:not([hidden=until-found])){display:none}.col-span-2{grid-column:span 2 / span 2}.mb-1{margin-bottom:0.25rem}.mb-12{margin-bottom:3rem}.mb-16{margin-bottom:4rem}.mb-2{margin-bottom:0.5rem}.mb-3{margin-bottom:0.75rem}.mb-4{margin-bottom:1rem}.mb-6{margin-bottom:1.5rem}.mb-8{margin-bottom:2rem}.mr-2{margin-right:0.5rem}.mt-1{margin-top:0.25rem}.mt-16{margin-top:4rem}.mt-8{margin-top:2rem}.block{display:block}.flex{display:flex}.grid{display:grid}.h-32{height:8rem}.h-48{height:12rem}.w-full{width:100%}.border-collapse{border-collapse:collapse}.grid-cols-1{grid-template-columns:repeat(1, minmax(0, 1fr))}.items-start{align-items:flex-start}.items-center{align-items:center}.justify-between{justify-content:space-between}.gap-6{gap:1.5rem}.gap-8{gap:2rem}.space-x-6 > :not([hidden]) ~ :not([hidden]){--tw-space-x-reverse:0;margin-right:calc(1.5rem * var(--tw-space-x-reverse));margin-left:calc(1.5rem * calc(1 - var(--tw-space-x-reverse)))}.space-y-1 > :not([hidden]) ~ :not([hidden]){--tw-space-y-reverse:0;margin-top:calc(0.25rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(0.25rem * var(--tw-space-y-reverse))}.space-y-12 > :not([hidden]) ~ :not([hidden]){--tw-space-y-reverse:0;margin-top:calc(3rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(3rem * var(--tw-space-y-reverse))}.space-y-2 > :not([hidden]) ~ :not([hidden]){--tw-space-y-reverse:0;margin-top:calc(0.5rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(0.5rem * var(--tw-space-y-reverse))}.space-y-3 > :not([hidden]) ~ :not([hidden]){--tw-space-y-reverse:0;margin-top:calc(0.75rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(0.75rem * var(--tw-space-y-reverse))}.space-y-4 > :not([hidden]) ~ :not([hidden]){--tw-space-y-reverse:0;margin-top:calc(1rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(1rem * var(--tw-space-y-reverse))}.space-y-6 > :not([hidden]) ~ :not([hidden]){--tw-space-y-reverse:0;margin-top:calc(1.5rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(1.5rem * var(--tw-space-y-reverse))}.overflow-x-auto{overflow-x:auto}.rounded{border-radius:0.25rem}.rounded-lg{border-radius:0.5rem}.border{border-width:1px}.border-l-4{border-left-width:4px}.border-t{border-top-width:1px}.border-blue-400{--tw-border-opacity:1;border-color:rgb(96 165 250 / var(--tw-border-opacity, 1))}.border-gray-200{--tw-border-opacity:1;border-color:rgb(229 231 235 / var(--tw-border-opacity, 1))}.border-green-400{--tw-border-opacity:1;border-color:rgb(74 222 128 / var(--tw-border-opacity, 1))}.border-orange-400{--tw-border-opacity:1;border-color:rgb(251 146 60 / var(--tw-border-opacity, 1))}.border-purple-400{--tw-border-opacity:1;border-color:rgb(192 132 252 / var(--tw-border-opacity, 1))}.border-red-400{--tw-border-opacity:1;border-color:rgb(248 113 113 / var(--tw-border-opacity, 1))}.bg-blue-50{--tw-bg-opacity:1;background-color:rgb(239 246 255 / var(--tw-bg-opacity, 1))}.bg-gray-50{--tw-bg-opacity:1;background-color:rgb(249 250 251 / var(--tw-bg-opacity, 1))}.bg-green-50{--tw-bg-opacity:1;background-color:rgb(240 253 244 / var(--tw-bg-opacity, 1))}.bg-purple-50{--tw-bg-opacity:1;background-color:rgb(250 245 255 / var(--tw-bg-opacity, 1))}.bg-white{--tw-bg-opacity:1;background-color:rgb(255 255 255 / var(--tw-bg-opacity, 1))}.bg-blue-100{--tw-bg-opacity:1;background-color:rgb(219 234 254 / var(--tw-bg-opacity, 1))}.bg-gradient-to-br{background-image:linear-gradient(to bottom right, var(--tw-gradient-stops))}.from-blue-50{--tw-gradient-from:#eff6ff var(--tw-gradient-from-position);--tw-gradient-to:rgb(239 246 255 / 0) var(--tw-gradient-to-position);--tw-gradient-stops:var(--tw-gradient-from), var(--tw-gradient-to)}.from-green-50{--tw-gradient-from:#f0fdf4 var(--tw-gradient-from-position);--tw-gradient-to:rgb(240 253 244 / 0) var(--tw-gradient-to-position);--tw-gradient-stops:var(--tw-gradient-from), var(--tw-gradient-to)}.from-orange-50{--tw-gradient-from:#fff7ed var(--tw-gradient-from-position);--tw-gradient-to:rgb(255 247 237 / 0) var(--tw-gradient-to-position);--tw-gradient-stops:var(--tw-gradient-from), var(--tw-gradient-to)}.from-purple-50{--tw-gradient-from:#faf5ff var(--tw-gradient-from-position);--tw-gradient-to:rgb(250 245 255 / 0) var(--tw-gradient-to-position);--tw-gradient-stops:var(--tw-gradient-from), var(--tw-gradient-to)}.to-blue-100{--tw-gradient-to:#dbeafe var(--tw-gradient-to-position)}.to-green-100{--tw-gradient-to:#dcfce7 var(--tw-gradient-to-position)}.to-indigo-100{--tw-gradient-to:#e0e7ff var(--tw-gradient-to-position)}.to-orange-100{--tw-gradient-to:#ffedd5 var(--tw-gradient-to-position)}.to-purple-100{--tw-gradient-to:#f3e8ff var(--tw-gradient-to-position)}.object-cover{object-fit:cover}.p-2{padding:0.5rem}.p-3{padding:0.75rem}.p-6{padding:1.5rem}.p-8{padding:2rem}.px-2{padding-left:0.5rem;padding-right:0.5rem}.py-1{padding-top:0.25rem;padding-bottom:0.25rem}.pl-3{padding-left:0.75rem}.pt-8{padding-top:2rem}.text-left{text-align:left}.text-center{text-align:center}.text-2xl{font-size:1.5rem;line-height:2rem}.text-3xl{font-size:1.875rem;line-height:2.25rem}.text-lg{font-size:1.125rem;line-height:1.75rem}.text-sm{font-size:0.875rem;line-height:1.25rem}.text-xl{font-size:1.25rem;line-height:1.75rem}.text-xs{font-size:0.75rem;line-height:1rem}.font-bold{font-weight:700}.font-medium{font-weight:500}.font-semibold{font-weight:600}.text-amber-500{--tw-text-opacity:1;color:rgb(245 158 11 / var(--tw-text-opacity, 1))}.text-amber-800{--tw-text-opacity:1;color:rgb(146 64 14 / var(--tw-text-opacity, 1))}.text-blue-500{--tw-text-opacity:1;color:rgb(59 130 246 / var(--tw-text-opacity, 1))}.text-blue-600{--tw-text-opacity:1;color:rgb(37 99 235 / var(--tw-text-opacity, 1))}.text-blue-700{--tw-text-opacity:1;color:rgb(29 78 216 / var(--tw-text-opacity, 1))}.text-cyan-700{--tw-text-opacity:1;color:rgb(14 116 144 / var(--tw-text-opacity, 1))}.text-gray-500{--tw-text-opacity:1;color:rgb(107 114 128 / var(--tw-text-opacity, 1))}.text-gray-600{--tw-text-opacity:1;color:rgb(75 85 99 / var(--tw-text-opacity, 1))}.text-gray-700{--tw-text-opacity:1;color:rgb(55 65 81 / var(--tw-text-opacity, 1))}.text-gray-800{--tw-text-opacity:1;color:rgb(31 41 55 / var(--tw-text-opacity, 1))}.text-green-500{--tw-text-opacity:1;color:rgb(34 197 94 / var(--tw-text-opacity, 1))}.text-green-600{--tw-text-opacity:1;color:rgb(22 163 74 / var(--tw-text-opacity, 1))}.text-green-700{--tw-text-opacity:1;color:rgb(21 128 61 / var(--tw-text-opacity, 1))}.text-indigo-700{--tw-text-opacity:1;color:rgb(67 56 202 / var(--tw-text-opacity, 1))}.text-orange-700{--tw-text-opacity:1;color:rgb(194 65 12 / var(--tw-text-opacity, 1))}.text-pink-700{--tw-text-opacity:1;color:rgb(190 24 93 / var(--tw-text-opacity, 1))}.text-purple-700{--tw-text-opacity:1;color:rgb(126 34 206 / var(--tw-text-opacity, 1))}.text-red-600{--tw-text-opacity:1;color:rgb(220 38 38 / var(--tw-text-opacity, 1))}.text-red-700{--tw-text-opacity:1;color:rgb(185 28 28 / var(--tw-text-opacity, 1))}.text-teal-700{--tw-text-opacity:1;color:rgb(15 118 110 / var(--tw-text-opacity, 1))}.text-yellow-600{--tw-text-opacity:1;color:rgb(202 138 4 / var(--tw-text-opacity, 1))}.text-blue-800{--tw-text-opacity:1;color:rgb(30 64 175 / var(--tw-text-opacity, 1))}.transition-colors{transition-property:color, background-color, border-color, fill, stroke, -webkit-text-decoration-color;transition-property:color, background-color, border-color, text-decoration-color, fill, stroke;transition-property:color, background-color, border-color, text-decoration-color, fill, stroke, -webkit-text-decoration-color;transition-timing-function:cubic-bezier(0.4, 0, 0.2, 1);transition-duration:150ms}.hover\:bg-blue-50:hover{--tw-bg-opacity:1;background-color:rgb(239 246 255 / var(--tw-bg-opacity, 1))}.hover\:text-blue-800:hover{--tw-text-opacity:1;color:rgb(30 64 175 / var(--tw-text-opacity, 1))}@media (min-width: 768px){.md\:grid-cols-2{grid-template-columns:repeat(2, minmax(0, 1fr))}.md\:grid-cols-3{grid-template-columns:repeat(3, minmax(0, 1fr))}}@media (min-width: 1024px){.lg\:grid-cols-2{grid-template-columns:repeat(2, minmax(0, 1fr))}.lg\:grid-cols-3{grid-template-columns:repeat(3, minmax(0, 1fr))}.lg\:grid-cols-4{grid-template-columns:repeat(4, minmax(0, 1fr))}}</style><script src="./漫画创作Agent系统：期末课程项目方案_files/publish.CNtwZTFp.min.js.下载" async=""></script>
+    <style>
+      .kimi-brand-container {
+        position: fixed;
+        bottom: 16px;
+        right: 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        z-index: 99999999;
+        transition: opacity 0.3s ease;
+      }
+
+      .kimi-brand-close-icon {
+        cursor: pointer;
+        border-radius: 50%;
+        width: 26px;
+        height: 26px;
+        background: rgba(69, 69, 69, 0.70);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        border: 0.5px solid rgba(255, 255, 255, 0.15);
+      }
+
+      .kimi-brand-container:hover .kimi-brand-close-icon {
+        display: flex;
+      }
+
+      .kimi-brand-link {
+        background: #000;
+        color: white;
+        padding: 4px 6px 4px 4px;
+        border-radius: 16px;
+        font-family: Arial, sans-serif;
+        font-size: 12px;
+        line-height: 18px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        border: 0.5px solid rgba(255, 255, 255, 0.15);
+        text-decoration: none;
+      }
+
+      .kimi-brand-container:hover .kimi-brand-icon {
+        width: 16px;
+      }
+
+      .kimi-brand-icon {
+        width: 0;
+        overflow: hidden;
+        transition: width 0.3s ease;
+        pointer-events: none;
+      }
+
+      .kimi-brand-avatar {
+        width: 18px;
+        height: 18px;
+        border: 0.5px solid rgba(255, 255, 255, 0.15);
+        border-radius: 50%;
+      }
+    </style>
+  </head>
+
+  <body class="bg-gray-50">
+    <!-- Fixed Table of Contents -->
+    <nav class="toc-fixed">
+      <h3 class="font-display text-lg font-semibold text-gray-800 mb-4">目录导航</h3>
+      <ul class="space-y-2 text-sm">
+        <li>
+          <a href="https://www.kimi.com/preview/19e221bb-fba2-8209-8000-051da1b0177b#introduction" class="block py-1 px-2 rounded hover:bg-blue-50 text-blue-600 hover:text-blue-800 transition-colors">项目概述</a>
+        </li>
+        <li>
+          <a href="https://www.kimi.com/preview/19e221bb-fba2-8209-8000-051da1b0177b#research" class="block py-1 px-2 rounded hover:bg-blue-50 text-blue-600 hover:text-blue-800 transition-colors">技术调研</a>
+        </li>
+        <li>
+          <a href="https://www.kimi.com/preview/19e221bb-fba2-8209-8000-051da1b0177b#architecture" class="block py-1 px-2 rounded hover:bg-blue-50 text-blue-600 hover:text-blue-800 transition-colors bg-blue-100 text-blue-800">系统架构</a>
+        </li>
+        <li>
+          <a href="https://www.kimi.com/preview/19e221bb-fba2-8209-8000-051da1b0177b#algorithms" class="block py-1 px-2 rounded hover:bg-blue-50 text-blue-600 hover:text-blue-800 transition-colors">核心算法</a>
+        </li>
+        <li>
+          <a href="https://www.kimi.com/preview/19e221bb-fba2-8209-8000-051da1b0177b#tech-stack" class="block py-1 px-2 rounded hover:bg-blue-50 text-blue-600 hover:text-blue-800 transition-colors">技术栈选型</a>
+        </li>
+        <li>
+          <a href="https://www.kimi.com/preview/19e221bb-fba2-8209-8000-051da1b0177b#timeline" class="block py-1 px-2 rounded hover:bg-blue-50 text-blue-600 hover:text-blue-800 transition-colors">开发计划</a>
+        </li>
+        <li>
+          <a href="https://www.kimi.com/preview/19e221bb-fba2-8209-8000-051da1b0177b#innovation" class="block py-1 px-2 rounded hover:bg-blue-50 text-blue-600 hover:text-blue-800 transition-colors">创新亮点</a>
+        </li>
+      </ul>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Hero Section with Bento Grid -->
+      <section class="mb-16">
+        <div class="bento-grid">
+          <!-- Main Title Card -->
+          <div class="bento-item col-span-2 bg-gradient-to-br from-blue-50 to-indigo-100 p-8">
+            <h1 class="hero-title mb-6">
+              漫画创作Agent系统
+            </h1>
+            <p class="text-xl text-gray-700 mb-6 font-medium">
+              基于多Agent协作的自动化漫画创作技术方案
+            </p>
+            <div class="flex items-center space-x-6 text-sm text-gray-600">
+              <span class="flex items-center">
+                <i class="fas fa-users mr-2"></i>
+                四人小组
+              </span>
+              <span class="flex items-center">
+                <i class="fas fa-calendar mr-2"></i>
+                一个月开发周期
+              </span>
+              <span class="flex items-center">
+                <i class="fas fa-robot mr-2"></i>
+                Agent+图形学
+              </span>
+            </div>
+          </div>
+
+          <!-- Visual Preview -->
+          <div class="bento-item">
+            <img src="./漫画创作Agent系统：期末课程项目方案_files/f4b245bffef2fd8128e6d85725ecb52de79b4270.png" alt="AI漫画创作系统的工作界面" class="w-full h-48 object-cover" size="medium" aspect="wide" query="AI漫画创作系统界面" referrerpolicy="no-referrer" data-modified="1" data-score="0.00">
+            <div class="p-6">
+              <h3 class="font-display text-lg font-semibold mb-2">智能创作流程</h3>
+              <p class="text-gray-600 text-sm">从Prompt到完整漫画的端到端生成</p>
+            </div>
+          </div>
+
+          <!-- Key Features -->
+          <div class="bento-item bg-white">
+            <div class="p-6">
+              <h3 class="font-display text-lg font-semibold mb-4">核心功能</h3>
+              <ul class="space-y-3 text-sm">
+                <li class="flex items-start">
+                  <i class="fas fa-check-circle text-green-500 mr-2 mt-1"></i>
+                  <span>简单Prompt自动创作</span>
+                </li>
+                <li class="flex items-start">
+                  <i class="fas fa-check-circle text-green-500 mr-2 mt-1"></i>
+                  <span>详细剧本分镜生成</span>
+                </li>
+                <li class="flex items-start">
+                  <i class="fas fa-check-circle text-green-500 mr-2 mt-1"></i>
+                  <span>小说/漫画改编创作</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Introduction Section -->
+      <section id="introduction" class="mb-16">
+        <h2 class="font-display text-3xl font-bold text-gray-800 mb-8">项目定位与核心目标</h2>
+
+        <div class="highlight-box">
+          <h3 class="font-display text-xl font-semibold mb-3 text-amber-800">
+            <i class="fas fa-bullseye mr-2"></i>项目定位
+          </h3>
+          <p class="text-gray-700">
+            本项目属于计算机图形学课程期末项目的扩展部分，明确定位于<strong>"Agent + 图形学"</strong>的交叉领域，具体聚焦于<strong>2D漫画的自动生成</strong>。在一个月的开发周期内，四人小组将构建一个基于多Agent协作的自动化漫画创作系统。
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mt-8">
+          <div class="tech-card">
+            <h3 class="font-display text-lg font-semibold mb-4 text-blue-700">
+              <i class="fas fa-puzzle-piece mr-2"></i>功能定位
+            </h3>
+            <div class="space-y-4">
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">简单Prompt驱动</h4>
+                <p class="text-sm text-gray-600">主题 + 风格 → 自动创作完整漫画</p>
+              </div>
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">详细剧本驱动</h4>
+                <p class="text-sm text-gray-600">结构化剧本 → 高质量分镜漫画</p>
+              </div>
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">改编还原模式</h4>
+                <p class="text-sm text-gray-600">小说原文/漫画原图 → 风格迁移创作</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="tech-card">
+            <h3 class="font-display text-lg font-semibold mb-4 text-green-700">
+              <i class="fas fa-trophy mr-2"></i>创新目标
+            </h3>
+            <div class="space-y-4">
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">基础达标</h4>
+                <p class="text-sm text-gray-600">准时提交完整材料（10分）</p>
+              </div>
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">质量竞争</h4>
+                <p class="text-sm text-gray-600">多Agent协作架构原创设计（10分）</p>
+              </div>
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">满分冲刺</h4>
+                <p class="text-sm text-gray-600">有效的技术创新点（20分）</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- Research Section -->
+      <section id="research" class="mb-16">
+        <h2 class="font-display text-3xl font-bold text-gray-800 mb-8">现有技术调研与经验借鉴</h2>
+
+        <div class="space-y-12">
+          <!-- Academic Research -->
+          <div>
+            <h3 class="font-display text-2xl font-semibold text-gray-800 mb-6">学术研究前沿</h3>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div class="tech-card">
+                <h4 class="font-display text-lg font-semibold mb-4 text-blue-700">
+                  <i class="fas fa-graduation-cap mr-2"></i>DiffSensei框架 (CVPR 2025)
+                </h4>
+                <p class="text-gray-700 mb-4">
+                  由北京大学、上海人工智能实验室等机构联合推出的AI漫画生成框架，代表了当前学术界的最高水平。<a href="https://aixzd.com/aicomicfactory" class="citation">[4]</a>
+                </p>
+                <div class="space-y-2 text-sm">
+                  <div class="flex items-start">
+                    <i class="fas fa-star text-amber-500 mr-2 mt-1"></i>
+                    <span><strong>MLLM+扩散模型桥接架构</strong>：实现文本兼容的角色适配器</span>
+                  </div>
+                  <div class="flex items-start">
+                    <i class="fas fa-star text-amber-500 mr-2 mt-1"></i>
+                    <span><strong>掩码交叉注意力机制</strong>：精确控制多角色布局</span>
+                  </div>
+                  <div class="flex items-start">
+                    <i class="fas fa-star text-amber-500 mr-2 mt-1"></i>
+                    <span><strong>MangaZero数据集</strong>：43,264页漫画训练数据支撑</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="tech-card">
+                <h4 class="font-display text-lg font-semibold mb-4 text-green-700">
+                  <i class="fas fa-book mr-2"></i>TaleDiffusion框架
+                </h4>
+                <p class="text-gray-700 mb-4">
+                  专注于多角色故事生成与对话渲染，提出身份一致性自注意力(ICSA)机制。<a href="https://arxiv.org/html/2509.04123v2" class="citation">[174]</a>
+                </p>
+                <div class="space-y-2 text-sm">
+                  <div class="flex items-start">
+                    <i class="fas fa-cog text-blue-500 mr-2 mt-1"></i>
+                    <span><strong>LoRA低秩适配</strong>：高效实现角色定制</span>
+                  </div>
+                  <div class="flex items-start">
+                    <i class="fas fa-cog text-blue-500 mr-2 mt-1"></i>
+                    <span><strong>蒙版引导</strong>：保持多角色分离</span>
+                  </div>
+                  <div class="flex items-start">
+                    <i class="fas fa-cog text-blue-500 mr-2 mt-1"></i>
+                    <span><strong>多面板叙事连贯性</strong>：上下文学习保持故事一致性</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Industry Products -->
+          <div>
+            <h3 class="font-display text-2xl font-semibold text-gray-800 mb-6">工业产品实践</h3>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div class="tech-card">
+                <h4 class="font-display text-lg font-semibold mb-3 text-purple-700">
+                  <i class="fas fa-industry mr-2"></i>WEBTOON WCAI
+                </h4>
+                <p class="text-sm text-gray-600 mb-3">
+                  LangGraph驱动的多Agent工作流编排，实现70%人工成本降低。<a href="https://yujustcoding.com/about-me/webtoon-langgraph.html" class="citation">[221]</a>
+                </p>
+                <ul class="text-xs space-y-1 text-gray-600">
+                  <li>• 角色识别与画像</li>
+                  <li>• 情节结构抽取</li>
+                  <li>• 视觉情绪分析</li>
+                </ul>
+              </div>
+
+              <div class="tech-card">
+                <h4 class="font-display text-lg font-semibold mb-3 text-orange-700">
+                  <i class="fas fa-palette mr-2"></i>Jenova AI
+                </h4>
+                <p class="text-sm text-gray-600 mb-3">
+                  脚本到分镜的自动转换引擎，支持身份嵌入与参考系统。<a href="https://www.jenova.ai/en/resources/ai-character-comic-generator" class="citation">[186]</a>
+                </p>
+                <ul class="text-xs space-y-1 text-gray-600">
+                  <li>• 叙事驱动分镜布局</li>
+                  <li>• 角色一致性保障</li>
+                  <li>• 专业漫画创作流程</li>
+                </ul>
+              </div>
+
+              <div class="tech-card">
+                <h4 class="font-display text-lg font-semibold mb-3 text-teal-700">
+                  <i class="fas fa-tools mr-2"></i>开源方案
+                </h4>
+                <p class="text-sm text-gray-600 mb-3">
+                  n8n+Gemini流水线和CrewAI多Agent示例提供了实用参考。<a href="https://community.n8n.io/t/built-an-ai-pipeline-that-turns-text-into-full-comic-book-storyboards-feels-like-a-goldmine-but-i-need-some-discuss/225002" class="citation">[206]</a>
+                </p>
+                <ul class="text-xs space-y-1 text-gray-600">
+                  <li>• 三阶段Agent划分</li>
+                  <li>• 轻量级状态存储</li>
+                  <li>• 人机协作节点</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- Technical Challenges -->
+          <div>
+            <h3 class="font-display text-2xl font-semibold text-gray-800 mb-6">关键技术挑战</h3>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div class="tech-card border-l-4 border-red-400">
+                <h4 class="font-display text-lg font-semibold mb-3 text-red-700">
+                  <i class="fas fa-exclamation-triangle mr-2"></i>角色跨面板一致性
+                </h4>
+                <p class="text-gray-700 mb-3">
+                  核心难点在于扩散模型生成过程的随机性导致角色外观漂移，影响阅读体验。
+                </p>
+                <div class="text-sm text-gray-600">
+                  <strong>解决方案：</strong>IP-Adapter链式参考 + 动态身份嵌入
+                </div>
+              </div>
+
+              <div class="tech-card border-l-4 border-blue-400">
+                <h4 class="font-display text-lg font-semibold mb-3 text-blue-700">
+                  <i class="fas fa-map mr-2"></i>语义到视觉映射
+                </h4>
+                <p class="text-gray-700 mb-3">
+                  文本描述与视觉表现之间的巨大语义鸿沟，需要精确的转换规则。
+                </p>
+                <div class="text-sm text-gray-600">
+                  <strong>解决方案：</strong>视觉语法规则库 + 分层语义解析
+                </div>
+              </div>
+
+              <div class="tech-card border-l-4 border-green-400">
+                <h4 class="font-display text-lg font-semibold mb-3 text-green-700">
+                  <i class="fas fa-comments mr-2"></i>对话与构图协调
+                </h4>
+                <p class="text-gray-700 mb-3">
+                  对话框位置、大小与画面构图的自动协调，避免遮挡关键元素。
+                </p>
+                <div class="text-sm text-gray-600">
+                  <strong>解决方案：</strong>基于注意力热图的智能避让算法
+                </div>
+              </div>
+
+              <div class="tech-card border-l-4 border-purple-400">
+                <h4 class="font-display text-lg font-semibold mb-3 text-purple-700">
+                  <i class="fas fa-heartbeat mr-2"></i>叙事节奏匹配
+                </h4>
+                <p class="text-gray-700 mb-3">
+                  分镜密度与情感曲线的动态匹配，营造恰当的叙事节奏感。
+                </p>
+                <div class="text-sm text-gray-600">
+                  <strong>解决方案：</strong>情感曲线驱动的自适应布局算法
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- Architecture Section -->
+      <section id="architecture" class="mb-16">
+        <h2 class="font-display text-3xl font-bold text-gray-800 mb-8">系统架构设计</h2>
+
+        <div class="mb-8">
+          <h3 class="font-display text-2xl font-semibold text-gray-800 mb-6">总体架构：分层解耦的Agent工作流</h3>
+
+          <div class="mermaid-container">
+            <div class="mermaid-controls">
+              <button class="mermaid-control-btn zoom-in" title="放大">
+                <i class="fas fa-search-plus"></i>
+              </button>
+              <button class="mermaid-control-btn zoom-out" title="缩小">
+                <i class="fas fa-search-minus"></i>
+              </button>
+              <button class="mermaid-control-btn reset-zoom" title="重置">
+                <i class="fas fa-expand-arrows-alt"></i>
+              </button>
+              <button class="mermaid-control-btn fullscreen" title="全屏查看">
+                <i class="fas fa-expand"></i>
+              </button>
+            </div>
+            <div class="mermaid" data-processed="true" style="transform: translate(0px, 0px) scale(0.877521); cursor: grab;"><svg id="mermaid-1778761921793" width="780.6119995117188" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" height="330" viewBox="-8 -8 780.6119995117188 330" role="graphics-document document" aria-roledescription="flowchart-v2"><style>#mermaid-1778761921793{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;fill:#1a1a1a;}#mermaid-1778761921793 .error-icon{fill:#f1f5f9;}#mermaid-1778761921793 .error-text{fill:#0e0a06;stroke:#0e0a06;}#mermaid-1778761921793 .edge-thickness-normal{stroke-width:2px;}#mermaid-1778761921793 .edge-thickness-thick{stroke-width:3.5px;}#mermaid-1778761921793 .edge-pattern-solid{stroke-dasharray:0;}#mermaid-1778761921793 .edge-pattern-dashed{stroke-dasharray:3;}#mermaid-1778761921793 .edge-pattern-dotted{stroke-dasharray:2;}#mermaid-1778761921793 .marker{fill:#64748b;stroke:#64748b;}#mermaid-1778761921793 .marker.cross{stroke:#64748b;}#mermaid-1778761921793 svg{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;}#mermaid-1778761921793 .label{font-family:"trebuchet ms",verdana,arial,sans-serif;color:#1a1a1a;}#mermaid-1778761921793 .cluster-label text{fill:#0e0a06;}#mermaid-1778761921793 .cluster-label span,#mermaid-1778761921793 p{color:#0e0a06;}#mermaid-1778761921793 .label text,#mermaid-1778761921793 span,#mermaid-1778761921793 p{fill:#1a1a1a;color:#1a1a1a;}#mermaid-1778761921793 .node rect,#mermaid-1778761921793 .node circle,#mermaid-1778761921793 .node ellipse,#mermaid-1778761921793 .node polygon,#mermaid-1778761921793 .node path{fill:#ffffff;stroke:#1e40af;stroke-width:1px;}#mermaid-1778761921793 .flowchart-label text{text-anchor:middle;}#mermaid-1778761921793 .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#mermaid-1778761921793 .node .label{text-align:center;}#mermaid-1778761921793 .node.clickable{cursor:pointer;}#mermaid-1778761921793 .arrowheadPath{fill:#000000;}#mermaid-1778761921793 .edgePath .path{stroke:#64748b;stroke-width:2.0px;}#mermaid-1778761921793 .flowchart-link{stroke:#64748b;fill:none;}#mermaid-1778761921793 .edgeLabel{background-color:#f3e5f5;text-align:center;}#mermaid-1778761921793 .edgeLabel rect{opacity:0.5;background-color:#f3e5f5;fill:#f3e5f5;}#mermaid-1778761921793 .labelBkg{background-color:rgba(243, 229, 245, 0.5);}#mermaid-1778761921793 .cluster rect{fill:#f1f5f9;stroke:hsl(210, 0%, 86.0784313725%);stroke-width:1px;}#mermaid-1778761921793 .cluster text{fill:#0e0a06;}#mermaid-1778761921793 .cluster span,#mermaid-1778761921793 p{color:#0e0a06;}#mermaid-1778761921793 div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:12px;background:#f1f5f9;border:1px solid hsl(210, 0%, 86.0784313725%);border-radius:2px;pointer-events:none;z-index:100;}#mermaid-1778761921793 .flowchartTitleText{text-anchor:middle;font-size:18px;fill:#1a1a1a;}#mermaid-1778761921793 :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}</style><g><marker id="mermaid-1778761921793_flowchart-pointEnd" class="marker flowchart" viewBox="0 0 10 10" refX="6" refY="5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="mermaid-1778761921793_flowchart-pointStart" class="marker flowchart" viewBox="0 0 10 10" refX="4.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 0 5 L 10 10 L 10 0 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></path></marker><marker id="mermaid-1778761921793_flowchart-circleEnd" class="marker flowchart" viewBox="0 0 10 10" refX="11" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="mermaid-1778761921793_flowchart-circleStart" class="marker flowchart" viewBox="0 0 10 10" refX="-1" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle></marker><marker id="mermaid-1778761921793_flowchart-crossEnd" class="marker cross flowchart" viewBox="0 0 11 11" refX="12" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><marker id="mermaid-1778761921793_flowchart-crossStart" class="marker cross flowchart" viewBox="0 0 11 11" refX="-1" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"></path></marker><g class="root"><g class="clusters"></g><g class="edgePaths"><path d="M321.299,41L321.299,45.167C321.299,49.333,321.299,57.667,326.353,65.483C331.406,73.299,341.512,80.598,346.565,84.247L351.618,87.897" id="L-A-B-0" class="edge-thickness-normal edge-pattern-solid flowchart-link LS-A LE-B" style="fill:none;" marker-end="url(#mermaid-1778761921793_flowchart-pointEnd)"></path><path d="M315.201,121.078L272.011,127.065C228.821,133.052,142.442,145.026,99.252,154.296C56.063,163.567,56.063,170.133,56.063,173.417L56.063,176.7" id="L-B-C-0" class="edge-thickness-normal edge-pattern-solid flowchart-link LS-B LE-C" style="fill:none;" marker-end="url(#mermaid-1778761921793_flowchart-pointEnd)"></path><path d="M315.201,124.756L287.188,130.13C259.175,135.504,203.15,146.252,180.901,155.316C158.652,164.381,170.18,171.761,175.943,175.452L181.707,179.142" id="L-B-D-0" class="edge-thickness-normal edge-pattern-solid flowchart-link LS-B LE-D" style="fill:none;" marker-end="url(#mermaid-1778761921793_flowchart-pointEnd)"></path><path d="M384.299,132L384.299,136.167C384.299,140.333,384.299,148.667,384.299,156.117C384.299,163.567,384.299,170.133,384.299,173.417L384.299,176.7" id="L-B-E-0" class="edge-thickness-normal edge-pattern-solid flowchart-link LS-B LE-E" style="fill:none;" marker-end="url(#mermaid-1778761921793_flowchart-pointEnd)"></path><path d="M425.328,132L433.667,136.167C442.006,140.333,458.684,148.667,472.787,156.524C486.889,164.381,498.417,171.761,504.18,175.452L509.944,179.142" id="L-B-F-0" class="edge-thickness-normal edge-pattern-solid flowchart-link LS-B LE-F" style="fill:none;" marker-end="url(#mermaid-1778761921793_flowchart-pointEnd)"></path><path d="M453.398,121.196L495.924,127.164C538.449,133.131,623.499,145.065,666.024,154.316C708.549,163.567,708.549,170.133,708.549,173.417L708.549,176.7" id="L-B-G-0" class="edge-thickness-normal edge-pattern-solid flowchart-link LS-B LE-G" style="fill:none;" marker-end="url(#mermaid-1778761921793_flowchart-pointEnd)"></path><path d="M56.063,223L56.063,227.167C56.063,231.333,56.063,239.667,56.063,247.117C56.063,254.567,56.063,261.133,56.063,264.417L56.063,267.7" id="L-C-H-0" class="edge-thickness-normal edge-pattern-solid flowchart-link LS-C LE-H" style="fill:none;" marker-end="url(#mermaid-1778761921793_flowchart-pointEnd)"></path><path d="M218.188,223L218.188,227.167C218.188,231.333,218.188,239.667,218.188,247.117C218.188,254.567,218.188,261.133,218.188,264.417L218.188,267.7" id="L-D-I-0" class="edge-thickness-normal edge-pattern-solid flowchart-link LS-D LE-I" style="fill:none;" marker-end="url(#mermaid-1778761921793_flowchart-pointEnd)"></path><path d="M384.299,223L384.299,227.167C384.299,231.333,384.299,239.667,384.299,247.117C384.299,254.567,384.299,261.133,384.299,264.417L384.299,267.7" id="L-E-J-0" class="edge-thickness-normal edge-pattern-solid flowchart-link LS-E LE-J" style="fill:none;" marker-end="url(#mermaid-1778761921793_flowchart-pointEnd)"></path><path d="M546.424,223L546.424,227.167C546.424,231.333,546.424,239.667,546.424,247.117C546.424,254.567,546.424,261.133,546.424,264.417L546.424,267.7" id="L-F-K-0" class="edge-thickness-normal edge-pattern-solid flowchart-link LS-F LE-K" style="fill:none;" marker-end="url(#mermaid-1778761921793_flowchart-pointEnd)"></path><path d="M708.549,223L708.549,227.167C708.549,231.333,708.549,239.667,708.549,247.117C708.549,254.567,708.549,261.133,708.549,264.417L708.549,267.7" id="L-G-L-0" class="edge-thickness-normal edge-pattern-solid flowchart-link LS-G LE-L" style="fill:none;" marker-end="url(#mermaid-1778761921793_flowchart-pointEnd)"></path><path d="M667.549,128.9L659.206,133.583C650.862,138.267,634.174,147.633,620.067,156.007C605.96,164.381,594.432,171.761,588.669,175.452L582.905,179.142" id="L-M-F-0" class="edge-thickness-normal edge-pattern-solid flowchart-link LS-M LE-F" style="fill:none;" marker-end="url(#mermaid-1778761921793_flowchart-pointEnd)"></path><path d="M174.138,128.084L183.146,132.904C192.155,137.723,210.171,147.361,218.453,155.485C226.735,163.608,225.283,170.216,224.557,173.52L223.831,176.824" id="L-N-D-0" class="edge-thickness-normal edge-pattern-solid flowchart-link LS-N LE-D" style="fill:none;" marker-end="url(#mermaid-1778761921793_flowchart-pointEnd)"></path><path d="M447.299,41L447.299,45.167C447.299,49.333,447.299,57.667,442.246,65.483C437.193,73.299,427.087,80.598,422.034,84.247L416.981,87.897" id="L-O-B-0" class="edge-thickness-normal edge-pattern-solid flowchart-link LS-O LE-B" style="fill:none;" marker-end="url(#mermaid-1778761921793_flowchart-pointEnd)"></path></g><g class="edgeLabels"><g class="edgeLabel"><g class="label" transform="translate(0, 0)"><foreignobject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="edgeLabel"></span></div></foreignobject></g></g><g class="edgeLabel"><g class="label" transform="translate(0, 0)"><foreignobject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="edgeLabel"></span></div></foreignobject></g></g><g class="edgeLabel"><g class="label" transform="translate(0, 0)"><foreignobject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="edgeLabel"></span></div></foreignobject></g></g><g class="edgeLabel"><g class="label" transform="translate(0, 0)"><foreignobject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="edgeLabel"></span></div></foreignobject></g></g><g class="edgeLabel"><g class="label" transform="translate(0, 0)"><foreignobject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="edgeLabel"></span></div></foreignobject></g></g><g class="edgeLabel"><g class="label" transform="translate(0, 0)"><foreignobject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="edgeLabel"></span></div></foreignobject></g></g><g class="edgeLabel"><g class="label" transform="translate(0, 0)"><foreignobject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="edgeLabel"></span></div></foreignobject></g></g><g class="edgeLabel"><g class="label" transform="translate(0, 0)"><foreignobject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="edgeLabel"></span></div></foreignobject></g></g><g class="edgeLabel"><g class="label" transform="translate(0, 0)"><foreignobject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="edgeLabel"></span></div></foreignobject></g></g><g class="edgeLabel"><g class="label" transform="translate(0, 0)"><foreignobject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="edgeLabel"></span></div></foreignobject></g></g><g class="edgeLabel"><g class="label" transform="translate(0, 0)"><foreignobject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="edgeLabel"></span></div></foreignobject></g></g><g class="edgeLabel"><g class="label" transform="translate(0, 0)"><foreignobject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="edgeLabel"></span></div></foreignobject></g></g><g class="edgeLabel"><g class="label" transform="translate(0, 0)"><foreignobject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="edgeLabel"></span></div></foreignobject></g></g><g class="edgeLabel"><g class="label" transform="translate(0, 0)"><foreignobject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="edgeLabel"></span></div></foreignobject></g></g></g><g class="nodes"><g class="node default flowchart-label" id="flowchart-A-0" data-node="true" data-id="A" transform="translate(321.2994804382324, 20.5)"><rect class="basic label-container" style="fill:#e3f2fd;stroke:#1e40af;stroke-width:3px;" rx="0" ry="0" x="-38" y="-20.5" width="76" height="41"></rect><g class="label" style="color:#1a1a1a;" transform="translate(-28, -10.5)"><rect></rect><foreignobject width="56" height="21"><div style="color: rgb(26, 26, 26); display: inline-block; white-space: nowrap;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel" style="color:#1a1a1a;">用户输入</span></div></foreignobject></g></g><g class="node default flowchart-label" id="flowchart-B-1" data-node="true" data-id="B" transform="translate(384.2994804382324, 111.5)"><rect class="basic label-container" style="fill:#fff3e0;stroke:#d97706;stroke-width:3px;" rx="0" ry="0" x="-69.09896087646484" y="-20.5" width="138.1979217529297" height="41"></rect><g class="label" style="color:#1a1a1a;" transform="translate(-59.098960876464844, -10.5)"><rect></rect><foreignobject width="118.19792175292969" height="21"><div style="color: rgb(26, 26, 26); display: inline-block; white-space: nowrap;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel" style="color:#1a1a1a;">编排层: LangGraph</span></div></foreignobject></g></g><g class="node default default flowchart-label" id="flowchart-C-3" data-node="true" data-id="C" transform="translate(56.0625, 202.5)"><rect class="basic label-container" style="fill:#f3e5f5;stroke:#7c3aed;stroke-width:2px;" rx="0" ry="0" x="-56.0625" y="-20.5" width="112.125" height="41"></rect><g class="label" style="color:#1a1a1a;" transform="translate(-46.0625, -10.5)"><rect></rect><foreignobject width="92.125" height="21"><div style="color: rgb(26, 26, 26); display: inline-block; white-space: nowrap;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel" style="color:#1a1a1a;">剧本理解Agent</span></div></foreignobject></g></g><g class="node default default flowchart-label" id="flowchart-D-5" data-node="true" data-id="D" transform="translate(218.1875, 202.5)"><rect class="basic label-container" style="fill:#f3e5f5;stroke:#7c3aed;stroke-width:2px;" rx="0" ry="0" x="-56.0625" y="-20.5" width="112.125" height="41"></rect><g class="label" style="color:#1a1a1a;" transform="translate(-46.0625, -10.5)"><rect></rect><foreignobject width="92.125" height="21"><div style="color: rgb(26, 26, 26); display: inline-block; white-space: nowrap;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel" style="color:#1a1a1a;">角色管理Agent</span></div></foreignobject></g></g><g class="node default default flowchart-label" id="flowchart-E-7" data-node="true" data-id="E" transform="translate(384.2994804382324, 202.5)"><rect class="basic label-container" style="fill:#f3e5f5;stroke:#7c3aed;stroke-width:2px;" rx="0" ry="0" x="-56.0625" y="-20.5" width="112.125" height="41"></rect><g class="label" style="color:#1a1a1a;" transform="translate(-46.0625, -10.5)"><rect></rect><foreignobject width="92.125" height="21"><div style="color: rgb(26, 26, 26); display: inline-block; white-space: nowrap;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel" style="color:#1a1a1a;">分镜设计Agent</span></div></foreignobject></g></g><g class="node default flowchart-label" id="flowchart-F-9" data-node="true" data-id="F" transform="translate(546.4244804382324, 202.5)"><rect class="basic label-container" style="fill:#f3e5f5;stroke:#7c3aed;stroke-width:2px;" rx="0" ry="0" x="-56.0625" y="-20.5" width="112.125" height="41"></rect><g class="label" style="color:#1a1a1a;" transform="translate(-46.0625, -10.5)"><rect></rect><foreignobject width="92.125" height="21"><div style="color: rgb(26, 26, 26); display: inline-block; white-space: nowrap;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel" style="color:#1a1a1a;">图像生成Agent</span></div></foreignobject></g></g><g class="node default flowchart-label" id="flowchart-G-11" data-node="true" data-id="G" transform="translate(708.5494804382324, 202.5)"><rect class="basic label-container" style="fill:#f3e5f5;stroke:#7c3aed;stroke-width:2px;" rx="0" ry="0" x="-56.0625" y="-20.5" width="112.125" height="41"></rect><g class="label" style="color:#1a1a1a;" transform="translate(-46.0625, -10.5)"><rect></rect><foreignobject width="92.125" height="21"><div style="color: rgb(26, 26, 26); display: inline-block; white-space: nowrap;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel" style="color:#1a1a1a;">排版合成Agent</span></div></foreignobject></g></g><g class="node default default flowchart-label" id="flowchart-H-13" data-node="true" data-id="H" transform="translate(56.0625, 293.5)"><rect class="basic label-container" style="" rx="0" ry="0" x="-45" y="-20.5" width="90" height="41"></rect><g class="label" style="" transform="translate(-35, -10.5)"><rect></rect><foreignobject width="70" height="21"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="nodeLabel">结构化剧本</span></div></foreignobject></g></g><g class="node default default flowchart-label" id="flowchart-I-15" data-node="true" data-id="I" transform="translate(218.1875, 293.5)"><rect class="basic label-container" style="" rx="0" ry="0" x="-45" y="-20.5" width="90" height="41"></rect><g class="label" style="" transform="translate(-35, -10.5)"><rect></rect><foreignobject width="70" height="21"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="nodeLabel">角色档案库</span></div></foreignobject></g></g><g class="node default default flowchart-label" id="flowchart-J-17" data-node="true" data-id="J" transform="translate(384.2994804382324, 293.5)"><rect class="basic label-container" style="" rx="0" ry="0" x="-38" y="-20.5" width="76" height="41"></rect><g class="label" style="" transform="translate(-28, -10.5)"><rect></rect><foreignobject width="56" height="21"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="nodeLabel">分镜规划</span></div></foreignobject></g></g><g class="node default flowchart-label" id="flowchart-K-19" data-node="true" data-id="K" transform="translate(546.4244804382324, 293.5)"><rect class="basic label-container" style="" rx="0" ry="0" x="-38" y="-20.5" width="76" height="41"></rect><g class="label" style="" transform="translate(-28, -10.5)"><rect></rect><foreignobject width="56" height="21"><div xmlns="http://www.w3.org/1999/xhtml" style="display: inline-block; white-space: nowrap;"><span class="nodeLabel">单帧图像</span></div></foreignobject></g></g><g class="node default default flowchart-label" id="flowchart-L-21" data-node="true" data-id="L" transform="translate(708.5494804382324, 293.5)"><rect class="basic label-container" style="fill:#e8f5e8;stroke:#059669;stroke-width:3px;" rx="0" ry="0" x="-38" y="-20.5" width="76" height="41"></rect><g class="label" style="color:#1a1a1a;" transform="translate(-28, -10.5)"><rect></rect><foreignobject width="56" height="21"><div style="color: rgb(26, 26, 26); display: inline-block; white-space: nowrap;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel" style="color:#1a1a1a;">最终漫画</span></div></foreignobject></g></g><g class="node default default flowchart-label" id="flowchart-M-22" data-node="true" data-id="M" transform="translate(698.5494804382324, 111.5)"><rect class="basic label-container" style="fill:#fce4ec;stroke:#be185d;stroke-width:2px;" rx="0" ry="0" x="-31" y="-20.5" width="62" height="41"></rect><g class="label" style="color:#1a1a1a;" transform="translate(-21, -10.5)"><rect></rect><foreignobject width="42" height="21"><div style="color: rgb(26, 26, 26); display: inline-block; white-space: nowrap;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel" style="color:#1a1a1a;">模型层</span></div></foreignobject></g></g><g class="node default default flowchart-label" id="flowchart-N-24" data-node="true" data-id="N" transform="translate(143.13801956176758, 111.5)"><rect class="basic label-container" style="fill:#fce4ec;stroke:#be185d;stroke-width:2px;" rx="0" ry="0" x="-31" y="-20.5" width="62" height="41"></rect><g class="label" style="color:#1a1a1a;" transform="translate(-21, -10.5)"><rect></rect><foreignobject width="42" height="21"><div style="color: rgb(26, 26, 26); display: inline-block; white-space: nowrap;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel" style="color:#1a1a1a;">数据层</span></div></foreignobject></g></g><g class="node default default flowchart-label" id="flowchart-O-26" data-node="true" data-id="O" transform="translate(447.2994804382324, 20.5)"><rect class="basic label-container" style="fill:#fce4ec;stroke:#be185d;stroke-width:2px;" rx="0" ry="0" x="-38" y="-20.5" width="76" height="41"></rect><g class="label" style="color:#1a1a1a;" transform="translate(-28, -10.5)"><rect></rect><foreignobject width="56" height="21"><div style="color: rgb(26, 26, 26); display: inline-block; white-space: nowrap;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel" style="color:#1a1a1a;">状态管理</span></div></foreignobject></g></g></g></g></g></svg></div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+          <div class="tech-card bg-gradient-to-br from-blue-50 to-blue-100">
+            <h4 class="font-display text-lg font-semibold mb-3 text-blue-700">
+              <i class="fas fa-sitemap mr-2"></i>编排层
+            </h4>
+            <p class="text-sm text-gray-700 mb-3">
+              <strong>LangGraph</strong>驱动的状态机执行模型，负责任务调度与状态管理。
+            </p>
+            <ul class="text-xs space-y-1 text-gray-600">
+              <li>• 状态图(StateGraph)设计</li>
+              <li>• 条件边与动态路由</li>
+              <li>• 错误恢复与重试机制</li>
+            </ul>
+          </div>
+
+          <div class="tech-card bg-gradient-to-br from-green-50 to-green-100">
+            <h4 class="font-display text-lg font-semibold mb-3 text-green-700">
+              <i class="fas fa-brain mr-2"></i>智能体层
+            </h4>
+            <p class="text-sm text-gray-700 mb-3">
+              领域专用Agent集群，每个Agent负责特定专业任务。
+            </p>
+            <ul class="text-xs space-y-1 text-gray-600">
+              <li>• 剧本理解Agent</li>
+              <li>• 角色管理Agent</li>
+              <li>• 分镜设计Agent</li>
+              <li>• 图像生成Agent</li>
+              <li>• 排版合成Agent</li>
+            </ul>
+          </div>
+
+          <div class="tech-card bg-gradient-to-br from-purple-50 to-purple-100">
+            <h4 class="font-display text-lg font-semibold mb-3 text-purple-700">
+              <i class="fas fa-cogs mr-2"></i>模型层
+            </h4>
+            <p class="text-sm text-gray-700 mb-3">
+              可插拔的AI绘画模型接口，屏蔽后端差异。
+            </p>
+            <ul class="text-xs space-y-1 text-gray-600">
+              <li>• SD/SDXL适配器</li>
+              <li>• DiffSensei专用接口</li>
+              <li>• 云端API备用方案</li>
+            </ul>
+          </div>
+
+          <div class="tech-card bg-gradient-to-br from-orange-50 to-orange-100">
+            <h4 class="font-display text-lg font-semibold mb-3 text-orange-700">
+              <i class="fas fa-database mr-2"></i>数据层
+            </h4>
+            <p class="text-sm text-gray-700 mb-3">
+              轻量级存储方案，支持项目状态、角色库、素材缓存。
+            </p>
+            <ul class="text-xs space-y-1 text-gray-600">
+              <li>• SQLite项目状态</li>
+              <li>• JSON文件配置</li>
+              <li>• 本地文件素材缓存</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Multi-Agent Collaboration -->
+        <div class="mb-12">
+          <h3 class="font-display text-2xl font-semibold text-gray-800 mb-6">多Agent协作设计</h3>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div class="space-y-6">
+              <div class="tech-card">
+                <h4 class="font-display text-lg font-semibold mb-3 text-indigo-700">
+                  <i class="fas fa-file-alt mr-2"></i>剧本理解Agent
+                </h4>
+                <p class="text-sm text-gray-700 mb-3">
+                  将用户输入转换为结构化叙事表示，支持多种输入格式处理。
+                </p>
+                <div class="space-y-2 text-xs">
+                  <div class="bg-gray-50 p-2 rounded">
+                    <strong>输入处理：</strong>简单Prompt扩展、详细剧本解析、小说长文本分段
+                  </div>
+                  <div class="bg-gray-50 p-2 rounded">
+                    <strong>输出格式：</strong>标准化的场景描述JSON，包含角色、场景、分镜等要素
+                  </div>
+                  <div class="bg-gray-50 p-2 rounded">
+                    <strong>技术实现：</strong>基于LLM的结构化输出，JSON Schema校验
+                  </div>
+                </div>
+              </div>
+
+              <div class="tech-card">
+                <h4 class="font-display text-lg font-semibold mb-3 text-pink-700">
+                  <i class="fas fa-user-friends mr-2"></i>角色管理Agent
+                </h4>
+                <p class="text-sm text-gray-700 mb-3">
+                  维护角色视觉档案，保障跨面板一致性，动态构建角色库。
+                </p>
+                <div class="space-y-2 text-xs">
+                  <div class="bg-gray-50 p-2 rounded">
+                    <strong>核心功能：</strong>CLIP特征提取、参考图像索引、跨面板状态追踪
+                  </div>
+                  <div class="bg-gray-50 p-2 rounded">
+                    <strong>一致性机制：</strong>链式参考传递，动态身份嵌入计算
+                  </div>
+                  <div class="bg-gray-50 p-2 rounded">
+                    <strong>创新点：</strong>时间衰减加权的参考窗口，平衡一致性与变化
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="space-y-6">
+              <div class="tech-card">
+                <h4 class="font-display text-lg font-semibold mb-3 text-teal-700">
+                  <i class="fas fa-paint-brush mr-2"></i>图像生成Agent
+                </h4>
+                <p class="text-sm text-gray-700 mb-3">
+                  将分镜描述转换为像素图像，支持多种后端模型的抽象接口。
+                </p>
+                <div class="space-y-2 text-xs">
+                  <div class="bg-gray-50 p-2 rounded">
+                    <strong>模型抽象：</strong>统一接口支持SD/SDXL/DiffSensei等后端切换
+                  </div>
+                  <div class="bg-gray-50 p-2 rounded">
+                    <strong>提示词工程：</strong>风格指令 + 角色引用 + 构图约束
+                  </div>
+                  <div class="bg-gray-50 p-2 rounded">
+                    <strong>质量控制：</strong>自动质量检查与参数优化迭代
+                  </div>
+                </div>
+              </div>
+
+              <div class="tech-card">
+                <h4 class="font-display text-lg font-semibold mb-3 text-cyan-700">
+                  <i class="fas fa-layer-group mr-2"></i>排版合成Agent
+                </h4>
+                <p class="text-sm text-gray-700 mb-3">
+                  将分散生成的单帧图像组合为完整漫画页面，处理对话框和文字渲染。
+                </p>
+                <div class="space-y-2 text-xs">
+                  <div class="bg-gray-50 p-2 rounded">
+                    <strong>自动排版：</strong>基于分镜坐标的画面拼接算法
+                  </div>
+                  <div class="bg-gray-50 p-2 rounded">
+                    <strong>对话处理：</strong>智能气泡放置与文字自动换行
+                  </div>
+                  <div class="bg-gray-50 p-2 rounded">
+                    <strong>输出格式：</strong>支持PNG/PDF/PSD多种导出选项
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Workflow Engine -->
+        <div>
+          <h3 class="font-display text-2xl font-semibold text-gray-800 mb-6">工作流引擎设计</h3>
+
+          <div class="mermaid-container">
+            <div class="mermaid-controls">
+              <button class="mermaid-control-btn zoom-in" title="放大">
+                <i class="fas fa-search-plus"></i>
+              </button>
+              <button class="mermaid-control-btn zoom-out" title="缩小">
+                <i class="fas fa-search-minus"></i>
+              </button>
+              <button class="mermaid-control-btn reset-zoom" title="重置">
+                <i class="fas fa-expand-arrows-alt"></i>
+              </button>
+              <button class="mermaid-control-btn fullscreen" title="全屏查看">
+                <i class="fas fa-expand"></i>
+              </button>
+            </div>
+            <div class="mermaid" data-processed="true" style="transform: translate(0px, 0px) scale(1); cursor: grab;"><div id="dmermaid-1778761921964" style="font-family: &quot;trebuchet ms&quot;, verdana, arial, sans-serif;"><svg id="mermaid-1778761921964" width="100%" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 2412 512" style="max-width: 512px;" role="graphics-document document" aria-roledescription="error"><style>#mermaid-1778761921964{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;fill:#1a1a1a;}#mermaid-1778761921964 .error-icon{fill:#f1f5f9;}#mermaid-1778761921964 .error-text{fill:#0e0a06;stroke:#0e0a06;}#mermaid-1778761921964 .edge-thickness-normal{stroke-width:2px;}#mermaid-1778761921964 .edge-thickness-thick{stroke-width:3.5px;}#mermaid-1778761921964 .edge-pattern-solid{stroke-dasharray:0;}#mermaid-1778761921964 .edge-pattern-dashed{stroke-dasharray:3;}#mermaid-1778761921964 .edge-pattern-dotted{stroke-dasharray:2;}#mermaid-1778761921964 .marker{fill:#64748b;stroke:#64748b;}#mermaid-1778761921964 .marker.cross{stroke:#64748b;}#mermaid-1778761921964 svg{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;}#mermaid-1778761921964 :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}</style><g></g><g><path class="error-icon" d="m411.313,123.313c6.25-6.25 6.25-16.375 0-22.625s-16.375-6.25-22.625,0l-32,32-9.375,9.375-20.688-20.688c-12.484-12.5-32.766-12.5-45.25,0l-16,16c-1.261,1.261-2.304,2.648-3.31,4.051-21.739-8.561-45.324-13.426-70.065-13.426-105.867,0-192,86.133-192,192s86.133,192 192,192 192-86.133 192-192c0-24.741-4.864-48.327-13.426-70.065 1.402-1.007 2.79-2.049 4.051-3.31l16-16c12.5-12.492 12.5-32.758 0-45.25l-20.688-20.688 9.375-9.375 32.001-31.999zm-219.313,100.687c-52.938,0-96,43.063-96,96 0,8.836-7.164,16-16,16s-16-7.164-16-16c0-70.578 57.422-128 128-128 8.836,0 16,7.164 16,16s-7.164,16-16,16z"></path><path class="error-icon" d="m459.02,148.98c-6.25-6.25-16.375-6.25-22.625,0s-6.25,16.375 0,22.625l16,16c3.125,3.125 7.219,4.688 11.313,4.688 4.094,0 8.188-1.563 11.313-4.688 6.25-6.25 6.25-16.375 0-22.625l-16.001-16z"></path><path class="error-icon" d="m340.395,75.605c3.125,3.125 7.219,4.688 11.313,4.688 4.094,0 8.188-1.563 11.313-4.688 6.25-6.25 6.25-16.375 0-22.625l-16-16c-6.25-6.25-16.375-6.25-22.625,0s-6.25,16.375 0,22.625l15.999,16z"></path><path class="error-icon" d="m400,64c8.844,0 16-7.164 16-16v-32c0-8.836-7.156-16-16-16-8.844,0-16,7.164-16,16v32c0,8.836 7.156,16 16,16z"></path><path class="error-icon" d="m496,96.586h-32c-8.844,0-16,7.164-16,16 0,8.836 7.156,16 16,16h32c8.844,0 16-7.164 16-16 0-8.836-7.156-16-16-16z"></path><path class="error-icon" d="m436.98,75.605c3.125,3.125 7.219,4.688 11.313,4.688 4.094,0 8.188-1.563 11.313-4.688l32-32c6.25-6.25 6.25-16.375 0-22.625s-16.375-6.25-22.625,0l-32,32c-6.251,6.25-6.251,16.375-0.001,22.625z"></path><text class="error-text" x="1440" y="250" font-size="150px" style="text-anchor: middle;">Syntax error in text</text><text class="error-text" x="1250" y="400" font-size="100px" style="text-anchor: middle;">mermaid version 10.9.6</text></g></svg></div></div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-3 text-blue-700">
+                <i class="fas fa-user-check mr-2"></i>人机协作节点
+              </h4>
+              <ul class="text-sm space-y-2 text-gray-700">
+                <li>• 分镜确认：调整布局增删页面</li>
+                <li>• 角色设计确认：修改外观上传参考</li>
+                <li>• 关键页面审核：质量把关</li>
+              </ul>
+            </div>
+
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-3 text-green-700">
+                <i class="fas fa-shield-alt mr-2"></i>错误恢复策略
+              </h4>
+              <ul class="text-sm space-y-2 text-gray-700">
+                <li>• 模型调用失败：自动降级切换</li>
+                <li>• 质量不达标：参数优化重试</li>
+                <li>• 超时处理：延迟队列重调度</li>
+              </ul>
+            </div>
+
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-3 text-purple-700">
+                <i class="fas fa-sync-alt mr-2"></i>状态管理机制
+              </h4>
+              <ul class="text-sm space-y-2 text-gray-700">
+                <li>• 项目级状态：生命周期管理</li>
+                <li>• 页面级状态：并行生成控制</li>
+                <li>• 降级策略：多级故障处理</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- Algorithms Section -->
+      <section id="algorithms" class="mb-16">
+        <h2 class="font-display text-3xl font-bold text-gray-800 mb-8">核心算法与技术实现</h2>
+
+        <!-- Character Consistency -->
+        <div class="mb-12">
+          <h3 class="font-display text-2xl font-semibold text-gray-800 mb-6">角色一致性保障机制</h3>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-4 text-indigo-700">
+                <i class="fas fa-link mr-2"></i>参考图像链式传递
+              </h4>
+              <div class="mb-4">
+                <img src="./漫画创作Agent系统：期末课程项目方案_files/248517a348161f28276c96907e4c7df637f1ccd5.webp" alt="AI漫画角色一致性生成示意图" class="w-full h-32 object-cover rounded-lg" size="medium" aspect="wide" query="AI漫画角色一致性生成" referrerpolicy="no-referrer" data-modified="1" data-score="0.00">
+              </div>
+              <p class="text-sm text-gray-700 mb-3">
+                创新的<strong>链式参考机制</strong>：生成第N面板时，不仅使用原始参考图像，还引入第N-1面板的生成结果作为"近期参考"。
+              </p>
+              <div class="bg-blue-50 p-3 rounded text-xs">
+                <strong>算法核心：</strong>
+                <br>
+                参考窗口W = [原始图, 近期图1, 近期图2]
+                <br>
+                动态身份嵌入 = Σ(wi × CLIP(fi)) / Σwi
+                <br>
+                其中wi按时间衰减，确保核心一致性同时允许合理变化
+              </div>
+            </div>
+
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-4 text-pink-700">
+                <i class="fas fa-database mr-2"></i>角色档案动态构建
+              </h4>
+              <div class="space-y-3">
+                <div class="bg-gray-50 p-3 rounded">
+                  <h5 class="font-semibold text-sm mb-2">初始构建</h5>
+                  <p class="text-xs text-gray-600">基于剧本描述生成基础参考图，用户确认后锁定为基础档案</p>
+                </div>
+                <div class="bg-gray-50 p-3 rounded">
+                  <h5 class="font-semibold text-sm mb-2">自举演化</h5>
+                  <p class="text-xs text-gray-600">高质量面板输出自动加入档案库，丰富表情姿态覆盖</p>
+                </div>
+                <div class="bg-gray-50 p-3 rounded">
+                  <h5 class="font-semibold text-sm mb-2">版本管理</h5>
+                  <p class="text-xs text-gray-600">支持回溯和分支，便于尝试不同设计方向</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Storyboard Generation -->
+        <div class="mb-12">
+          <h3 class="font-display text-2xl font-semibold text-gray-800 mb-6">分镜生成算法</h3>
+
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-3 text-teal-700">
+                <i class="fas fa-ruler mr-2"></i>景别选择规则
+              </h4>
+              <div class="space-y-2 text-sm">
+                <div class="flex justify-between">
+                  <span class="text-gray-700">远景</span>
+                  <span class="text-gray-600">建立环境氛围</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-700">全景</span>
+                  <span class="text-gray-600">展示角色环境关系</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-700">中景</span>
+                  <span class="text-gray-600">叙事主力景别</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-700">近景</span>
+                  <span class="text-gray-600">聚焦角色表情</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-700">特写</span>
+                  <span class="text-gray-600">制造视觉冲击</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-3 text-cyan-700">
+                <i class="fas fa-camera mr-2"></i>角度设计规则
+              </h4>
+              <div class="space-y-2 text-sm">
+                <div class="bg-gray-50 p-2 rounded">
+                  <strong>平视</strong> - 客观平等
+                </div>
+                <div class="bg-gray-50 p-2 rounded">
+                  <strong>俯视</strong> - 渺小无助
+                </div>
+                <div class="bg-gray-50 p-2 rounded">
+                  <strong>仰视</strong> - 威严力量
+                </div>
+                <div class="bg-gray-50 p-2 rounded">
+                  <strong>倾斜</strong> - 不稳定感
+                </div>
+              </div>
+            </div>
+
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-3 text-purple-700">
+                <i class="fas fa-cut mr-2"></i>格子切割技法
+              </h4>
+              <div class="space-y-2 text-sm">
+                <div class="bg-gray-50 p-2 rounded">
+                  <strong>矩形格子</strong> - 标准叙事
+                </div>
+                <div class="bg-gray-50 p-2 rounded">
+                  <strong>斜切格子</strong> - 增强动感
+                </div>
+                <div class="bg-gray-50 p-2 rounded">
+                  <strong>出血设计</strong> - 扩展空间
+                </div>
+                <div class="bg-gray-50 p-2 rounded">
+                  <strong>跨页布局</strong> - 制造震撼
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-8 tech-card">
+            <h4 class="font-display text-xl font-semibold mb-4 text-gray-800">
+              <i class="fas fa-chart-line mr-2"></i>动态布局生成算法
+            </h4>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <h5 class="font-semibold text-gray-800 mb-3">基于内容密度的面积分配</h5>
+                <p class="text-sm text-gray-700 mb-3">
+                  综合考虑对话数量、角色数量、动作复杂度、情感强度等因素，计算每个格子的"信息量指数"。
+                </p>
+                <div class="bg-blue-50 p-3 rounded text-xs">
+                  <strong>密度映射：</strong>
+                  <br>
+                  高密度(40-60%) → 多人混战、密集对话
+                  <br>
+                  中密度(20-40%) → 双人对话、中等动作
+                  <br>
+                  低密度(10-20%) → 环境展示、过渡镜头
+                </div>
+              </div>
+              <div>
+                <h5 class="font-semibold text-gray-800 mb-3">阅读流导向的排列优化</h5>
+                <p class="text-sm text-gray-700 mb-3">
+                  优化视线跳跃距离，避免阅读顺序歧义，平衡页面视觉重量分布。
+                </p>
+                <div class="bg-green-50 p-3 rounded text-xs">
+                  <strong>优化目标：</strong>
+                  <br>
+                  • 最小化相邻格子视觉中心距离
+                  <br>
+                  • 明确引导阅读方向
+                  <br>
+                  • 支持非线性排列创造特殊效果
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Model Interface -->
+        <div>
+          <h3 class="font-display text-2xl font-semibold text-gray-800 mb-6">可替换模型接口设计</h3>
+
+          <div class="mb-6">
+            <div class="mermaid-container">
+              <div class="mermaid-controls">
+                <button class="mermaid-control-btn zoom-in" title="放大">
+                  <i class="fas fa-search-plus"></i>
+                </button>
+                <button class="mermaid-control-btn zoom-out" title="缩小">
+                  <i class="fas fa-search-minus"></i>
+                </button>
+                <button class="mermaid-control-btn reset-zoom" title="重置">
+                  <i class="fas fa-expand-arrows-alt"></i>
+                </button>
+                <button class="mermaid-control-btn fullscreen" title="全屏查看">
+                  <i class="fas fa-expand"></i>
+                </button>
+              </div>
+              <div class="mermaid" data-processed="true" style="transform: translate(0px, 0px) scale(1); cursor: grab;"><div id="dmermaid-1778761921993" style="font-family: &quot;trebuchet ms&quot;, verdana, arial, sans-serif;"><svg id="mermaid-1778761921993" width="100%" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 2412 512" style="max-width: 512px;" role="graphics-document document" aria-roledescription="error"><style>#mermaid-1778761921993{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;fill:#1a1a1a;}#mermaid-1778761921993 .error-icon{fill:#f1f5f9;}#mermaid-1778761921993 .error-text{fill:#0e0a06;stroke:#0e0a06;}#mermaid-1778761921993 .edge-thickness-normal{stroke-width:2px;}#mermaid-1778761921993 .edge-thickness-thick{stroke-width:3.5px;}#mermaid-1778761921993 .edge-pattern-solid{stroke-dasharray:0;}#mermaid-1778761921993 .edge-pattern-dashed{stroke-dasharray:3;}#mermaid-1778761921993 .edge-pattern-dotted{stroke-dasharray:2;}#mermaid-1778761921993 .marker{fill:#64748b;stroke:#64748b;}#mermaid-1778761921993 .marker.cross{stroke:#64748b;}#mermaid-1778761921993 svg{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;}#mermaid-1778761921993 :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}</style><g></g><g><path class="error-icon" d="m411.313,123.313c6.25-6.25 6.25-16.375 0-22.625s-16.375-6.25-22.625,0l-32,32-9.375,9.375-20.688-20.688c-12.484-12.5-32.766-12.5-45.25,0l-16,16c-1.261,1.261-2.304,2.648-3.31,4.051-21.739-8.561-45.324-13.426-70.065-13.426-105.867,0-192,86.133-192,192s86.133,192 192,192 192-86.133 192-192c0-24.741-4.864-48.327-13.426-70.065 1.402-1.007 2.79-2.049 4.051-3.31l16-16c12.5-12.492 12.5-32.758 0-45.25l-20.688-20.688 9.375-9.375 32.001-31.999zm-219.313,100.687c-52.938,0-96,43.063-96,96 0,8.836-7.164,16-16,16s-16-7.164-16-16c0-70.578 57.422-128 128-128 8.836,0 16,7.164 16,16s-7.164,16-16,16z"></path><path class="error-icon" d="m459.02,148.98c-6.25-6.25-16.375-6.25-22.625,0s-6.25,16.375 0,22.625l16,16c3.125,3.125 7.219,4.688 11.313,4.688 4.094,0 8.188-1.563 11.313-4.688 6.25-6.25 6.25-16.375 0-22.625l-16.001-16z"></path><path class="error-icon" d="m340.395,75.605c3.125,3.125 7.219,4.688 11.313,4.688 4.094,0 8.188-1.563 11.313-4.688 6.25-6.25 6.25-16.375 0-22.625l-16-16c-6.25-6.25-16.375-6.25-22.625,0s-6.25,16.375 0,22.625l15.999,16z"></path><path class="error-icon" d="m400,64c8.844,0 16-7.164 16-16v-32c0-8.836-7.156-16-16-16-8.844,0-16,7.164-16,16v32c0,8.836 7.156,16 16,16z"></path><path class="error-icon" d="m496,96.586h-32c-8.844,0-16,7.164-16,16 0,8.836 7.156,16 16,16h32c8.844,0 16-7.164 16-16 0-8.836-7.156-16-16-16z"></path><path class="error-icon" d="m436.98,75.605c3.125,3.125 7.219,4.688 11.313,4.688 4.094,0 8.188-1.563 11.313-4.688l32-32c6.25-6.25 6.25-16.375 0-22.625s-16.375-6.25-22.625,0l-32,32c-6.251,6.25-6.251,16.375-0.001,22.625z"></path><text class="error-text" x="1440" y="250" font-size="150px" style="text-anchor: middle;">Syntax error in text</text><text class="error-text" x="1250" y="400" font-size="100px" style="text-anchor: middle;">mermaid version 10.9.6</text></g></svg></div></div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-4 text-blue-700">
+                <i class="fas fa-plug mr-2"></i>统一抽象层设计
+              </h4>
+              <div class="space-y-4">
+                <div>
+                  <h5 class="font-semibold text-gray-800 mb-2">标准化输入</h5>
+                  <div class="bg-gray-50 p-3 rounded text-sm">
+                    <ul class="space-y-1">
+                      <li>• prompt: 正面描述字符串</li>
+                      <li>• negative_prompt: 负面描述</li>
+                      <li>• reference_images: 参考图像列表</li>
+                      <li>• control_params: 控制参数字典</li>
+                      <li>• layout_info: 布局信息</li>
+                    </ul>
+                  </div>
+                </div>
+                <div>
+                  <h5 class="font-semibold text-gray-800 mb-2">标准化输出</h5>
+                  <div class="bg-gray-50 p-3 rounded text-sm">
+                    <ul class="space-y-1">
+                      <li>• image_data: 生成图像数据</li>
+                      <li>• metadata: 生成元信息</li>
+                      <li>• warnings: 警告信息</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-4 text-green-700">
+                <i class="fas fa-server mr-2"></i>后端适配器实现
+              </h4>
+              <div class="space-y-4">
+                <div class="border-l-4 border-blue-400 pl-3">
+                  <h5 class="font-semibold text-gray-800">Stable Diffusion/XL</h5>
+                  <p class="text-xs text-gray-600">基于diffusers库，支持IP-Adapter和ControlNet</p>
+                </div>
+                <div class="border-l-4 border-orange-400 pl-3">
+                  <h5 class="font-semibold text-gray-800">DiffSensei</h5>
+                  <p class="text-xs text-gray-600">专用接口，支持掩码注意力和MLLM适配器</p>
+                </div>
+                <div class="border-l-4 border-green-400 pl-3">
+                  <h5 class="font-semibold text-gray-800">云端API</h5>
+                  <p class="text-xs text-gray-600">封装主流API服务，支持成本控制和缓存策略</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-8">
+            <h4 class="font-display text-lg font-semibold mb-4 text-gray-800">后端模型对比</h4>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm border-collapse">
+                <thead>
+                  <tr class="bg-gray-50">
+                    <th class="border border-gray-200 p-2 text-left">后端模型</th>
+                    <th class="border border-gray-200 p-2 text-left">适用场景</th>
+                    <th class="border border-gray-200 p-2 text-left">推理成本</th>
+                    <th class="border border-gray-200 p-2 text-left">控制精度</th>
+                    <th class="border border-gray-200 p-2 text-left">部署复杂度</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="border border-gray-200 p-2 font-medium">Stable Diffusion 1.5</td>
+                    <td class="border border-gray-200 p-2">快速原型、风格探索</td>
+                    <td class="border border-gray-200 p-2 text-green-600">低</td>
+                    <td class="border border-gray-200 p-2">基础</td>
+                    <td class="border border-gray-200 p-2 text-green-600">低</td>
+                  </tr>
+                  <tr class="bg-gray-50">
+                    <td class="border border-gray-200 p-2 font-medium">Stable Diffusion XL</td>
+                    <td class="border border-gray-200 p-2">高质量单帧、印刷输出</td>
+                    <td class="border border-gray-200 p-2 text-yellow-600">中</td>
+                    <td class="border border-gray-200 p-2">基础</td>
+                    <td class="border border-gray-200 p-2 text-yellow-600">中</td>
+                  </tr>
+                  <tr>
+                    <td class="border border-gray-200 p-2 font-medium">DiffSensei</td>
+                    <td class="border border-gray-200 p-2">多角色精确控制</td>
+                    <td class="border border-gray-200 p-2 text-red-600">高</td>
+                    <td class="border border-gray-200 p-2">最优</td>
+                    <td class="border border-gray-200 p-2 text-red-600">高</td>
+                  </tr>
+                  <tr class="bg-gray-50">
+                    <td class="border border-gray-200 p-2 font-medium">云端API</td>
+                    <td class="border border-gray-200 p-2">快速启动、轻量使用</td>
+                    <td class="border border-gray-200 p-2 text-blue-600">按量计费</td>
+                    <td class="border border-gray-200 p-2">依赖服务商</td>
+                    <td class="border border-gray-200 p-2 text-green-600">极低</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- Tech Stack Section -->
+      <section id="tech-stack" class="mb-16">
+        <h2 class="font-display text-3xl font-bold text-gray-800 mb-8">技术栈选型</h2>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <!-- Backend -->
+          <div class="tech-card">
+            <h3 class="font-display text-xl font-semibold mb-4 text-blue-700">
+              <i class="fas fa-server mr-2"></i>后端核心
+            </h3>
+            <div class="space-y-4">
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">Agent框架</h4>
+                <p class="text-sm text-gray-600 mb-2">
+                  <strong>LangGraph</strong> - 专注于多智能体图结构编排，已被400+企业投入生产环境
+                </p>
+                <div class="text-xs text-gray-500">
+                  替代方案：CrewAI、AutoGen、自研状态机
+                </div>
+              </div>
+
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">LLM服务</h4>
+                <p class="text-sm text-gray-600 mb-2">
+                  <strong>本地开源模型</strong>（Qwen/ChatGLM）为主，<strong>API免费额度</strong>为辅
+                </p>
+                <div class="text-xs text-gray-500">
+                  推荐：Qwen2.5-7B、ChatGLM4、Gemini API
+                </div>
+              </div>
+
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">图像生成</h4>
+                <p class="text-sm text-gray-600 mb-2">
+                  <strong>ComfyUI</strong> - 节点式工作流，支持复杂生成流程
+                </p>
+                <div class="text-xs text-gray-500">
+                  替代方案：Stable Diffusion WebUI
+                </div>
+              </div>
+
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">数据存储</h4>
+                <p class="text-sm text-gray-600 mb-2">
+                  <strong>SQLite/JSON文件</strong> - 轻量级，演示友好
+                </p>
+                <div class="text-xs text-gray-500">
+                  缓存策略：diskcache自动管理
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Frontend -->
+          <div class="tech-card">
+            <h3 class="font-display text-xl font-semibold mb-4 text-green-700">
+              <i class="fas fa-desktop mr-2"></i>前端演示
+            </h3>
+            <div class="space-y-4">
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">框架选择</h4>
+                <p class="text-sm text-gray-600 mb-2">
+                  <strong>Gradio</strong> - 快速搭建，纯Python编写，专注功能展示
+                </p>
+                <div class="text-xs text-gray-500">
+                  替代方案：Streamlit（更灵活布局）
+                </div>
+              </div>
+
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">界面要素</h4>
+                <ul class="text-sm text-gray-600 space-y-1">
+                  <li>• 项目创建：主题/风格/模式选择</li>
+                  <li>• 剧本编辑：文本输入与结构化预览</li>
+                  <li>• 进度监控：Agent执行状态可视化</li>
+                  <li>• 结果浏览：分页漫画查看与导出</li>
+                </ul>
+              </div>
+
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">交互设计</h4>
+                <p class="text-sm text-gray-600 mb-2">
+                  渐进披露原则，高级选项默认折叠，降低使用门槛
+                </p>
+                <div class="text-xs text-gray-500">
+                  实时反馈增强系统透明度和用户信任感
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Deployment -->
+          <div class="tech-card">
+            <h3 class="font-display text-xl font-semibold mb-4 text-purple-700">
+              <i class="fas fa-cloud mr-2"></i>部署与资源
+            </h3>
+            <div class="space-y-4">
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">开发环境</h4>
+                <p class="text-sm text-gray-600 mb-2">
+                  推荐：<strong>AutoDL RTX 3090/A10</strong>云GPU平台
+                </p>
+                <div class="text-xs text-gray-500">
+                  备选：个人GPU、Google Colab
+                </div>
+              </div>
+
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">模型资源</h4>
+                <p class="text-sm text-gray-600 mb-2">
+                  <strong>HuggingFace</strong>开源权重 + <strong>Civitai</strong>风格LoRA
+                </p>
+                <div class="text-xs text-gray-500">
+                  推荐：SDXL、Animagine XL、IP-Adapter
+                </div>
+              </div>
+
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">成本控制</h4>
+                <p class="text-sm text-gray-600 mb-2">
+                  优先本地推理，API作为补充，利用免费额度
+                </p>
+                <div class="text-xs text-gray-500">
+                  预估成本：200-300元/月（云GPU）
+                </div>
+              </div>
+
+              <div>
+                <h4 class="font-semibold text-gray-800 mb-2">依赖管理</h4>
+                <p class="text-sm text-gray-600 mb-2">
+                  <strong>Poetry</strong>或<strong>conda</strong>，Python 3.10+
+                </p>
+                <div class="text-xs text-gray-500">
+                  版本控制：Git + 明确模型下载脚本
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- Timeline Section -->
+      <section id="timeline" class="mb-16">
+        <h2 class="font-display text-3xl font-bold text-gray-800 mb-8">开发计划与分工建议</h2>
+
+        <!-- Development Timeline -->
+        <div class="mb-12">
+          <h3 class="font-display text-2xl font-semibold text-gray-800 mb-6">四周迭代节奏</h3>
+
+          <div class="mermaid-container">
+            <div class="mermaid-controls">
+              <button class="mermaid-control-btn zoom-in" title="放大">
+                <i class="fas fa-search-plus"></i>
+              </button>
+              <button class="mermaid-control-btn zoom-out" title="缩小">
+                <i class="fas fa-search-minus"></i>
+              </button>
+              <button class="mermaid-control-btn reset-zoom" title="重置">
+                <i class="fas fa-expand-arrows-alt"></i>
+              </button>
+              <button class="mermaid-control-btn fullscreen" title="全屏查看">
+                <i class="fas fa-expand"></i>
+              </button>
+            </div>
+            <div class="mermaid" data-processed="true" style="transform: translate(0px, 0px) scale(0.426163); cursor: grab;"><svg id="mermaid-1778761922038" width="1730" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" height="717.7333374023438" viewBox="30 -32.666666984558105 1730 717.7333374023438" role="graphics-document document" aria-roledescription="timeline"><style>#mermaid-1778761922038{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;fill:#1a1a1a;}#mermaid-1778761922038 .error-icon{fill:#f1f5f9;}#mermaid-1778761922038 .error-text{fill:#0e0a06;stroke:#0e0a06;}#mermaid-1778761922038 .edge-thickness-normal{stroke-width:2px;}#mermaid-1778761922038 .edge-thickness-thick{stroke-width:3.5px;}#mermaid-1778761922038 .edge-pattern-solid{stroke-dasharray:0;}#mermaid-1778761922038 .edge-pattern-dashed{stroke-dasharray:3;}#mermaid-1778761922038 .edge-pattern-dotted{stroke-dasharray:2;}#mermaid-1778761922038 .marker{fill:#64748b;stroke:#64748b;}#mermaid-1778761922038 .marker.cross{stroke:#64748b;}#mermaid-1778761922038 svg{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;}#mermaid-1778761922038 .edge{stroke-width:3;}#mermaid-1778761922038 .section--1 rect,#mermaid-1778761922038 .section--1 path,#mermaid-1778761922038 .section--1 circle,#mermaid-1778761922038 .section--1 path{fill:#e3f2fd;}#mermaid-1778761922038 .section--1 text{fill:#1a1a1a;}#mermaid-1778761922038 .node-icon--1{font-size:40px;color:#1a1a1a;}#mermaid-1778761922038 .section-edge--1{stroke:#e3f2fd;}#mermaid-1778761922038 .edge-depth--1{stroke-width:17;}#mermaid-1778761922038 .section--1 line{stroke:rgb(147.0000000001, 68.25, 10.5);stroke-width:3;}#mermaid-1778761922038 .lineWrapper line{stroke:#1a1a1a;}#mermaid-1778761922038 .disabled,#mermaid-1778761922038 .disabled circle,#mermaid-1778761922038 .disabled text{fill:lightgray;}#mermaid-1778761922038 .disabled text{fill:#efefef;}#mermaid-1778761922038 .section-0 rect,#mermaid-1778761922038 .section-0 path,#mermaid-1778761922038 .section-0 circle,#mermaid-1778761922038 .section-0 path{fill:#f3e5f5;}#mermaid-1778761922038 .section-0 text{fill:#1a1a1a;}#mermaid-1778761922038 .node-icon-0{font-size:40px;color:#1a1a1a;}#mermaid-1778761922038 .section-edge-0{stroke:#f3e5f5;}#mermaid-1778761922038 .edge-depth-0{stroke-width:14;}#mermaid-1778761922038 .section-0 line{stroke:rgb(54.5, 118.0833333333, 45.4166666667);stroke-width:3;}#mermaid-1778761922038 .lineWrapper line{stroke:#1a1a1a;}#mermaid-1778761922038 .disabled,#mermaid-1778761922038 .disabled circle,#mermaid-1778761922038 .disabled text{fill:lightgray;}#mermaid-1778761922038 .disabled text{fill:#efefef;}#mermaid-1778761922038 .section-1 rect,#mermaid-1778761922038 .section-1 path,#mermaid-1778761922038 .section-1 circle,#mermaid-1778761922038 .section-1 path{fill:#e8f5e8;}#mermaid-1778761922038 .section-1 text{fill:#1a1a1a;}#mermaid-1778761922038 .node-icon-1{font-size:40px;color:#1a1a1a;}#mermaid-1778761922038 .section-edge-1{stroke:#e8f5e8;}#mermaid-1778761922038 .edge-depth-1{stroke-width:11;}#mermaid-1778761922038 .section-1 line{stroke:rgb(111.8636363636, 48.6363636364, 111.8636363636);stroke-width:3;}#mermaid-1778761922038 .lineWrapper line{stroke:#1a1a1a;}#mermaid-1778761922038 .disabled,#mermaid-1778761922038 .disabled circle,#mermaid-1778761922038 .disabled text{fill:lightgray;}#mermaid-1778761922038 .disabled text{fill:#efefef;}#mermaid-1778761922038 .section-2 rect,#mermaid-1778761922038 .section-2 path,#mermaid-1778761922038 .section-2 circle,#mermaid-1778761922038 .section-2 path{fill:#fff3e0;}#mermaid-1778761922038 .section-2 text{fill:#1a1a1a;}#mermaid-1778761922038 .node-icon-2{font-size:40px;color:#1a1a1a;}#mermaid-1778761922038 .section-edge-2{stroke:#fff3e0;}#mermaid-1778761922038 .edge-depth-2{stroke-width:8;}#mermaid-1778761922038 .section-2 line{stroke:rgb(0, 61.3548387095, 158.4999999998);stroke-width:3;}#mermaid-1778761922038 .lineWrapper line{stroke:#1a1a1a;}#mermaid-1778761922038 .disabled,#mermaid-1778761922038 .disabled circle,#mermaid-1778761922038 .disabled text{fill:lightgray;}#mermaid-1778761922038 .disabled text{fill:#efefef;}#mermaid-1778761922038 .section-3 rect,#mermaid-1778761922038 .section-3 path,#mermaid-1778761922038 .section-3 circle,#mermaid-1778761922038 .section-3 path{fill:#fce4ec;}#mermaid-1778761922038 .section-3 text{fill:#1a1a1a;}#mermaid-1778761922038 .node-icon-3{font-size:40px;color:#1a1a1a;}#mermaid-1778761922038 .section-edge-3{stroke:#fce4ec;}#mermaid-1778761922038 .edge-depth-3{stroke-width:5;}#mermaid-1778761922038 .section-3 line{stroke:rgb(15.75, 141.7500000001, 99.7500000001);stroke-width:3;}#mermaid-1778761922038 .lineWrapper line{stroke:#1a1a1a;}#mermaid-1778761922038 .disabled,#mermaid-1778761922038 .disabled circle,#mermaid-1778761922038 .disabled text{fill:lightgray;}#mermaid-1778761922038 .disabled text{fill:#efefef;}#mermaid-1778761922038 .section-4 rect,#mermaid-1778761922038 .section-4 path,#mermaid-1778761922038 .section-4 circle,#mermaid-1778761922038 .section-4 path{fill:hsl(295.3846153846, 86.6666666667%, 69.1176470588%);}#mermaid-1778761922038 .section-4 text{fill:#1a1a1a;}#mermaid-1778761922038 .node-icon-4{font-size:40px;color:#1a1a1a;}#mermaid-1778761922038 .section-edge-4{stroke:hsl(295.3846153846, 86.6666666667%, 69.1176470588%);}#mermaid-1778761922038 .edge-depth-4{stroke-width:2;}#mermaid-1778761922038 .section-4 line{stroke:rgb(21, 147.0000000001, 10.5);stroke-width:3;}#mermaid-1778761922038 .lineWrapper line{stroke:#1a1a1a;}#mermaid-1778761922038 .disabled,#mermaid-1778761922038 .disabled circle,#mermaid-1778761922038 .disabled text{fill:lightgray;}#mermaid-1778761922038 .disabled text{fill:#efefef;}#mermaid-1778761922038 .section-5 rect,#mermaid-1778761922038 .section-5 path,#mermaid-1778761922038 .section-5 circle,#mermaid-1778761922038 .section-5 path{fill:hsl(325.3846153846, 86.6666666667%, 69.1176470588%);}#mermaid-1778761922038 .section-5 text{fill:#1a1a1a;}#mermaid-1778761922038 .node-icon-5{font-size:40px;color:#1a1a1a;}#mermaid-1778761922038 .section-edge-5{stroke:hsl(325.3846153846, 86.6666666667%, 69.1176470588%);}#mermaid-1778761922038 .edge-depth-5{stroke-width:-1;}#mermaid-1778761922038 .section-5 line{stroke:rgb(10.5, 147.0000000001, 68.25);stroke-width:3;}#mermaid-1778761922038 .lineWrapper line{stroke:#1a1a1a;}#mermaid-1778761922038 .disabled,#mermaid-1778761922038 .disabled circle,#mermaid-1778761922038 .disabled text{fill:lightgray;}#mermaid-1778761922038 .disabled text{fill:#efefef;}#mermaid-1778761922038 .section-6 rect,#mermaid-1778761922038 .section-6 path,#mermaid-1778761922038 .section-6 circle,#mermaid-1778761922038 .section-6 path{fill:hsl(355.3846153846, 86.6666666667%, 69.1176470588%);}#mermaid-1778761922038 .section-6 text{fill:#1a1a1a;}#mermaid-1778761922038 .node-icon-6{font-size:40px;color:#1a1a1a;}#mermaid-1778761922038 .section-edge-6{stroke:hsl(355.3846153846, 86.6666666667%, 69.1176470588%);}#mermaid-1778761922038 .edge-depth-6{stroke-width:-4;}#mermaid-1778761922038 .section-6 line{stroke:rgb(10.5, 147.0000000001, 136.5000000001);stroke-width:3;}#mermaid-1778761922038 .lineWrapper line{stroke:#1a1a1a;}#mermaid-1778761922038 .disabled,#mermaid-1778761922038 .disabled circle,#mermaid-1778761922038 .disabled text{fill:lightgray;}#mermaid-1778761922038 .disabled text{fill:#efefef;}#mermaid-1778761922038 .section-7 rect,#mermaid-1778761922038 .section-7 path,#mermaid-1778761922038 .section-7 circle,#mermaid-1778761922038 .section-7 path{fill:hsl(55.3846153846, 86.6666666667%, 75%);}#mermaid-1778761922038 .section-7 text{fill:#1a1a1a;}#mermaid-1778761922038 .node-icon-7{font-size:40px;color:#1a1a1a;}#mermaid-1778761922038 .section-edge-7{stroke:hsl(55.3846153846, 86.6666666667%, 75%);}#mermaid-1778761922038 .edge-depth-7{stroke-width:-7;}#mermaid-1778761922038 .section-7 line{stroke:rgb(8.5, 17, 119);stroke-width:3;}#mermaid-1778761922038 .lineWrapper line{stroke:#1a1a1a;}#mermaid-1778761922038 .disabled,#mermaid-1778761922038 .disabled circle,#mermaid-1778761922038 .disabled text{fill:lightgray;}#mermaid-1778761922038 .disabled text{fill:#efefef;}#mermaid-1778761922038 .section-8 rect,#mermaid-1778761922038 .section-8 path,#mermaid-1778761922038 .section-8 circle,#mermaid-1778761922038 .section-8 path{fill:hsl(115.3846153846, 86.6666666667%, 69.1176470588%);}#mermaid-1778761922038 .section-8 text{fill:#1a1a1a;}#mermaid-1778761922038 .node-icon-8{font-size:40px;color:#1a1a1a;}#mermaid-1778761922038 .section-edge-8{stroke:hsl(115.3846153846, 86.6666666667%, 69.1176470588%);}#mermaid-1778761922038 .edge-depth-8{stroke-width:-10;}#mermaid-1778761922038 .section-8 line{stroke:rgb(136.5000000001, 10.5, 147.0000000001);stroke-width:3;}#mermaid-1778761922038 .lineWrapper line{stroke:#1a1a1a;}#mermaid-1778761922038 .disabled,#mermaid-1778761922038 .disabled circle,#mermaid-1778761922038 .disabled text{fill:lightgray;}#mermaid-1778761922038 .disabled text{fill:#efefef;}#mermaid-1778761922038 .section-9 rect,#mermaid-1778761922038 .section-9 path,#mermaid-1778761922038 .section-9 circle,#mermaid-1778761922038 .section-9 path{fill:hsl(145.3846153846, 86.6666666667%, 69.1176470588%);}#mermaid-1778761922038 .section-9 text{fill:#1a1a1a;}#mermaid-1778761922038 .node-icon-9{font-size:40px;color:#1a1a1a;}#mermaid-1778761922038 .section-edge-9{stroke:hsl(145.3846153846, 86.6666666667%, 69.1176470588%);}#mermaid-1778761922038 .edge-depth-9{stroke-width:-13;}#mermaid-1778761922038 .section-9 line{stroke:rgb(147.0000000001, 10.5, 89.2500000001);stroke-width:3;}#mermaid-1778761922038 .lineWrapper line{stroke:#1a1a1a;}#mermaid-1778761922038 .disabled,#mermaid-1778761922038 .disabled circle,#mermaid-1778761922038 .disabled text{fill:lightgray;}#mermaid-1778761922038 .disabled text{fill:#efefef;}#mermaid-1778761922038 .section-10 rect,#mermaid-1778761922038 .section-10 path,#mermaid-1778761922038 .section-10 circle,#mermaid-1778761922038 .section-10 path{fill:hsl(175.3846153846, 86.6666666667%, 69.1176470588%);}#mermaid-1778761922038 .section-10 text{fill:#1a1a1a;}#mermaid-1778761922038 .node-icon-10{font-size:40px;color:#1a1a1a;}#mermaid-1778761922038 .section-edge-10{stroke:hsl(175.3846153846, 86.6666666667%, 69.1176470588%);}#mermaid-1778761922038 .edge-depth-10{stroke-width:-16;}#mermaid-1778761922038 .section-10 line{stroke:rgb(147.0000000001, 10.5, 21);stroke-width:3;}#mermaid-1778761922038 .lineWrapper line{stroke:#1a1a1a;}#mermaid-1778761922038 .disabled,#mermaid-1778761922038 .disabled circle,#mermaid-1778761922038 .disabled text{fill:lightgray;}#mermaid-1778761922038 .disabled text{fill:#efefef;}#mermaid-1778761922038 .section-root rect,#mermaid-1778761922038 .section-root path,#mermaid-1778761922038 .section-root circle{fill:hsl(205.3846153846, 86.6666666667%, 69.1176470588%);}#mermaid-1778761922038 .section-root text{fill:#1a1a1a;}#mermaid-1778761922038 .icon-container{height:100%;display:flex;justify-content:center;align-items:center;}#mermaid-1778761922038 .edge{fill:none;}#mermaid-1778761922038 .eventWrapper{filter:brightness(120%);}#mermaid-1778761922038 :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}</style><g></g><g></g><defs><marker id="arrowhead" refX="5" refY="2" markerWidth="6" markerHeight="4" orient="auto"><path d="M 0,0 V 4 L6,2 Z"></path></marker></defs><g transform="translate(100, 50)"><g class="timeline-node section--1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 63.13333396911621 v-58.13333396911621 q0,-5 5,-5 h380 q5,0 5,5 v63.13333396911621 H0 Z"></path><line class="node-line--1" x1="0" y1="68.13333396911621" x2="390" y2="68.13333396911621"></line></g><g transform="translate(195, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">第一周</tspan></text></g></g></g><g class="taskWrapper" transform="translate(100, 168.13333396911622)"><g class="timeline-node section--1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 63.13333396911621 v-58.13333396911621 q0,-5 5,-5 h180 q5,0 5,5 v63.13333396911621 H0 Z"></path><line class="node-line--1" x1="0" y1="68.13333396911621" x2="190" y2="68.13333396911621"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">架构搭建</tspan></text></g></g></g><g class="lineWrapper"><line x1="195" y1="236.26666793823244" x2="195" y2="665.0666717529298" stroke-width="2" stroke="black" marker-end="url(#arrowhead)" stroke-dasharray="5,5"></line></g><g class="eventWrapper" transform="translate(100, 368.1333339691162)"><g class="timeline-node section--1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line--1" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">工作流引擎框架</tspan></text></g></g></g><g class="eventWrapper" transform="translate(100, 428.1333339691162)"><g class="timeline-node section--1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line--1" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em"></tspan><tspan x="0" dy="1.1em">剧本理解Agent基础版</tspan></text></g></g></g><g class="eventWrapper" transform="translate(100, 488.1333339691162)"><g class="timeline-node section--1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line--1" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em"></tspan><tspan x="0" dy="1.1em">角色管理Agent基础版</tspan></text></g></g></g><g class="eventWrapper" transform="translate(100, 548.1333339691162)"><g class="timeline-node section--1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line--1" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">Gradio前端原型</tspan></text></g></g></g><g class="eventWrapper" transform="translate(100, 608.1333339691162)"><g class="timeline-node section--1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line--1" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">ComfyUI部署验证</tspan></text></g></g></g><g class="taskWrapper" transform="translate(300, 168.13333396911622)"><g class="timeline-node section--1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 63.13333396911621 v-58.13333396911621 q0,-5 5,-5 h180 q5,0 5,5 v63.13333396911621 H0 Z"></path><line class="node-line--1" x1="0" y1="68.13333396911621" x2="190" y2="68.13333396911621"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">里程碑</tspan></text></g></g></g><g class="lineWrapper"><line x1="395" y1="236.26666793823244" x2="395" y2="665.0666717529298" stroke-width="2" stroke="black" marker-end="url(#arrowhead)" stroke-dasharray="5,5"></line></g><g class="eventWrapper" transform="translate(300, 368.1333339691162)"><g class="timeline-node section--1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line--1" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em"></tspan><tspan x="0" dy="1.1em">输入主题→输出结构化剧本</tspan></text></g></g></g><g transform="translate(500, 50)"><g class="timeline-node section-0"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 63.13333396911621 v-58.13333396911621 q0,-5 5,-5 h380 q5,0 5,5 v63.13333396911621 H0 Z"></path><line class="node-line-0" x1="0" y1="68.13333396911621" x2="390" y2="68.13333396911621"></line></g><g transform="translate(195, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">第二周</tspan></text></g></g></g><g class="taskWrapper" transform="translate(500, 168.13333396911622)"><g class="timeline-node section-0"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 63.13333396911621 v-58.13333396911621 q0,-5 5,-5 h180 q5,0 5,5 v63.13333396911621 H0 Z"></path><line class="node-line-0" x1="0" y1="68.13333396911621" x2="190" y2="68.13333396911621"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">管线打通</tspan></text></g></g></g><g class="lineWrapper"><line x1="595" y1="236.26666793823244" x2="595" y2="665.0666717529298" stroke-width="2" stroke="black" marker-end="url(#arrowhead)" stroke-dasharray="5,5"></line></g><g class="eventWrapper" transform="translate(500, 368.1333339691162)"><g class="timeline-node section-0"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line-0" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">分镜设计Agent实现</tspan></text></g></g></g><g class="eventWrapper" transform="translate(500, 428.1333339691162)"><g class="timeline-node section-0"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line-0" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">图像生成接口完善</tspan></text></g></g></g><g class="eventWrapper" transform="translate(500, 488.1333339691162)"><g class="timeline-node section-0"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line-0" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">角色一致性控制</tspan></text></g></g></g><g class="eventWrapper" transform="translate(500, 548.1333339691162)"><g class="timeline-node section-0"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line-0" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">进度监控界面</tspan></text></g></g></g><g class="taskWrapper" transform="translate(700, 168.13333396911622)"><g class="timeline-node section-0"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 63.13333396911621 v-58.13333396911621 q0,-5 5,-5 h180 q5,0 5,5 v63.13333396911621 H0 Z"></path><line class="node-line-0" x1="0" y1="68.13333396911621" x2="190" y2="68.13333396911621"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">里程碑</tspan></text></g></g></g><g class="lineWrapper"><line x1="795" y1="236.26666793823244" x2="795" y2="665.0666717529298" stroke-width="2" stroke="black" marker-end="url(#arrowhead)" stroke-dasharray="5,5"></line></g><g class="eventWrapper" transform="translate(700, 368.1333339691162)"><g class="timeline-node section-0"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line-0" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em"></tspan><tspan x="0" dy="1.1em">输入剧本→输出分镜图像序列</tspan></text></g></g></g><g transform="translate(900, 50)"><g class="timeline-node section-1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 63.13333396911621 v-58.13333396911621 q0,-5 5,-5 h380 q5,0 5,5 v63.13333396911621 H0 Z"></path><line class="node-line-1" x1="0" y1="68.13333396911621" x2="390" y2="68.13333396911621"></line></g><g transform="translate(195, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">第三周</tspan></text></g></g></g><g class="taskWrapper" transform="translate(900, 168.13333396911622)"><g class="timeline-node section-1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 63.13333396911621 v-58.13333396911621 q0,-5 5,-5 h180 q5,0 5,5 v63.13333396911621 H0 Z"></path><line class="node-line-1" x1="0" y1="68.13333396911621" x2="190" y2="68.13333396911621"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">系统集成</tspan></text></g></g></g><g class="lineWrapper"><line x1="995" y1="236.26666793823244" x2="995" y2="665.0666717529298" stroke-width="2" stroke="black" marker-end="url(#arrowhead)" stroke-dasharray="5,5"></line></g><g class="eventWrapper" transform="translate(900, 368.1333339691162)"><g class="timeline-node section-1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line-1" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">排版合成Agent</tspan></text></g></g></g><g class="eventWrapper" transform="translate(900, 428.1333339691162)"><g class="timeline-node section-1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line-1" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">多适配器实现</tspan></text></g></g></g><g class="eventWrapper" transform="translate(900, 488.1333339691162)"><g class="timeline-node section-1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line-1" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">人机协作节点</tspan></text></g></g></g><g class="eventWrapper" transform="translate(900, 548.1333339691162)"><g class="timeline-node section-1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line-1" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">完整前端整合</tspan></text></g></g></g><g class="taskWrapper" transform="translate(1100, 168.13333396911622)"><g class="timeline-node section-1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 63.13333396911621 v-58.13333396911621 q0,-5 5,-5 h180 q5,0 5,5 v63.13333396911621 H0 Z"></path><line class="node-line-1" x1="0" y1="68.13333396911621" x2="190" y2="68.13333396911621"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">里程碑</tspan></text></g></g></g><g class="lineWrapper"><line x1="1195" y1="236.26666793823244" x2="1195" y2="665.0666717529298" stroke-width="2" stroke="black" marker-end="url(#arrowhead)" stroke-dasharray="5,5"></line></g><g class="eventWrapper" transform="translate(1100, 368.1333339691162)"><g class="timeline-node section-1"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line-1" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">端到端完整漫画生成</tspan></text></g></g></g><g transform="translate(1300, 50)"><g class="timeline-node section-2"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 63.13333396911621 v-58.13333396911621 q0,-5 5,-5 h380 q5,0 5,5 v63.13333396911621 H0 Z"></path><line class="node-line-2" x1="0" y1="68.13333396911621" x2="390" y2="68.13333396911621"></line></g><g transform="translate(195, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">第四周</tspan></text></g></g></g><g class="taskWrapper" transform="translate(1300, 168.13333396911622)"><g class="timeline-node section-2"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 63.13333396911621 v-58.13333396911621 q0,-5 5,-5 h180 q5,0 5,5 v63.13333396911621 H0 Z"></path><line class="node-line-2" x1="0" y1="68.13333396911621" x2="190" y2="68.13333396911621"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">交付准备</tspan></text></g></g></g><g class="lineWrapper"><line x1="1395" y1="236.26666793823244" x2="1395" y2="665.0666717529298" stroke-width="2" stroke="black" marker-end="url(#arrowhead)" stroke-dasharray="5,5"></line></g><g class="eventWrapper" transform="translate(1300, 368.1333339691162)"><g class="timeline-node section-2"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line-2" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">对比实验设计</tspan></text></g></g></g><g class="eventWrapper" transform="translate(1300, 428.1333339691162)"><g class="timeline-node section-2"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line-2" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">技术报告撰写</tspan></text></g></g></g><g class="eventWrapper" transform="translate(1300, 488.1333339691162)"><g class="timeline-node section-2"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line-2" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">汇报PPT制作</tspan></text></g></g></g><g class="eventWrapper" transform="translate(1300, 548.1333339691162)"><g class="timeline-node section-2"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line-2" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">最终集成测试</tspan></text></g></g></g><g class="taskWrapper" transform="translate(1500, 168.13333396911622)"><g class="timeline-node section-2"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 63.13333396911621 v-58.13333396911621 q0,-5 5,-5 h180 q5,0 5,5 v63.13333396911621 H0 Z"></path><line class="node-line-2" x1="0" y1="68.13333396911621" x2="190" y2="68.13333396911621"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">里程碑</tspan></text></g></g></g><g class="lineWrapper"><line x1="1595" y1="236.26666793823244" x2="1595" y2="665.0666717529298" stroke-width="2" stroke="black" marker-end="url(#arrowhead)" stroke-dasharray="5,5"></line></g><g class="eventWrapper" transform="translate(1500, 368.1333339691162)"><g class="timeline-node section-2"><g><path id="node-undefined" class="node-bkg node-undefined" d="M0 45 v-40 q0,-5 5,-5 h180 q5,0 5,5 v45 H0 Z"></path><line class="node-line-2" x1="0" y1="50" x2="190" y2="50"></line></g><g transform="translate(95, 10)"><text dy="1em" alignment-baseline="middle" dominant-baseline="middle" text-anchor="middle"><tspan x="0" dy="1em">所有交付物就绪</tspan></text></g></g></g><text x="745" font-size="4ex" font-weight="bold" y="20">四周开发计划</text><g class="lineWrapper"><line x1="50" y1="286.26666793823244" x2="1740" y2="286.26666793823244" stroke-width="4" stroke="black" marker-end="url(#arrowhead)"></line></g></svg></div>
+          </div>
+        </div>
+
+        <!-- Team Division -->
+        <div>
+          <h3 class="font-display text-2xl font-semibold text-gray-800 mb-6">四人分工方案</h3>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-4 text-blue-700">
+                <i class="fas fa-user mr-2"></i>成员A - 工作流引擎 + 剧本理解Agent
+              </h4>
+              <div class="space-y-3">
+                <div>
+                  <h5 class="font-semibold text-gray-800 text-sm mb-1">核心职责</h5>
+                  <p class="text-xs text-gray-600">
+                    系统的"中枢神经系统"和"入口网关"，负责LangGraph状态图设计和剧本解析
+                  </p>
+                </div>
+                <div>
+                  <h5 class="font-semibold text-gray-800 text-sm mb-1">具体任务</h5>
+                  <ul class="text-xs text-gray-600 space-y-1">
+                    <li>• 工作流引擎框架实现</li>
+                    <li>• 剧本理解Agent全功能开发</li>
+                    <li>• JSON Schema设计和输出校验</li>
+                    <li>• LLM服务集成与部署</li>
+                    <li>• 叙事结构识别高级功能</li>
+                  </ul>
+                </div>
+                <div>
+                  <h5 class="font-semibold text-gray-800 text-sm mb-1">技能要求</h5>
+                  <p class="text-xs text-gray-600">
+                    系统架构能力、NLP背景、状态机设计经验
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-4 text-green-700">
+                <i class="fas fa-user mr-2"></i>成员B - 角色管理Agent + 一致性机制
+              </h4>
+              <div class="space-y-3">
+                <div>
+                  <h5 class="font-semibold text-gray-800 text-sm mb-1">核心职责</h5>
+                  <p class="text-xs text-gray-600">
+                    系统的"演员经纪人"，负责角色档案管理和一致性保障核心
+                  </p>
+                </div>
+                <div>
+                  <h5 class="font-semibold text-gray-800 text-sm mb-1">具体任务</h5>
+                  <ul class="text-xs text-gray-600 space-y-1">
+                    <li>• 角色档案数据模型设计</li>
+                    <li>• CLIP特征提取与索引集成</li>
+                    <li>• IP-Adapter链式参考机制实现</li>
+                    <li>• 跨面板状态追踪系统</li>
+                    <li>• 角色档案库动态更新策略</li>
+                  </ul>
+                </div>
+                <div>
+                  <h5 class="font-semibold text-gray-800 text-sm mb-1">技能要求</h5>
+                  <p class="text-xs text-gray-600">
+                    扩散模型理解、特征嵌入技术、一致性算法设计
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-4 text-purple-700">
+                <i class="fas fa-user mr-2"></i>成员C - 分镜设计Agent + 图像生成接口
+              </h4>
+              <div class="space-y-3">
+                <div>
+                  <h5 class="font-semibold text-gray-800 text-sm mb-1">核心职责</h5>
+                  <p class="text-xs text-gray-600">
+                    系统的"视觉导演"和"执行画师"，负责分镜设计和模型接口
+                  </p>
+                </div>
+                <div>
+                  <h5 class="font-semibold text-gray-800 text-sm mb-1">具体任务</h5>
+                  <ul class="text-xs text-gray-600 space-y-1">
+                    <li>• 视觉语法规则库构建</li>
+                    <li>• 动态布局生成算法实现</li>
+                    <li>• 模型抽象接口(UMI)设计</li>
+                    <li>• 提示词工程系统开发</li>
+                    <li>• ComfyUI/SD WebUI API集成</li>
+                  </ul>
+                </div>
+                <div>
+                  <h5 class="font-semibold text-gray-800 text-sm mb-1">技能要求</h5>
+                  <p class="text-xs text-gray-600">
+                    创意设计能力、工程实现能力、模型部署经验
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-4 text-orange-700">
+                <i class="fas fa-user mr-2"></i>成员D - 排版合成Agent + 前端Demo
+              </h4>
+              <div class="space-y-3">
+                <div>
+                  <h5 class="font-semibold text-gray-800 text-sm mb-1">核心职责</h5>
+                  <p class="text-xs text-gray-600">
+                    系统的"最终装配线"和"用户界面"，负责排版合成和前端开发
+                  </p>
+                </div>
+                <div>
+                  <h5 class="font-semibold text-gray-800 text-sm mb-1">具体任务</h5>
+                  <ul class="text-xs text-gray-600 space-y-1">
+                    <li>• 排版合成Agent全功能实现</li>
+                    <li>• Gradio前端界面完整开发</li>
+                    <li>• 人机协作节点交互设计</li>
+                    <li>• 系统集成测试与调试</li>
+                    <li>• 演示脚本编写与优化</li>
+                  </ul>
+                </div>
+                <div>
+                  <h5 class="font-semibold text-gray-800 text-sm mb-1">技能要求</h5>
+                  <p class="text-xs text-gray-600">
+                    全栈开发能力、UI/UX设计、质量测试经验
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Detailed Timeline -->
+          <div class="mt-8">
+            <h4 class="font-display text-xl font-semibold mb-4 text-gray-800">详细开发计划表</h4>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm border-collapse">
+                <thead>
+                  <tr class="bg-gray-50">
+                    <th class="border border-gray-200 p-3 text-left">周次</th>
+                    <th class="border border-gray-200 p-3 text-left">成员A</th>
+                    <th class="border border-gray-200 p-3 text-left">成员B</th>
+                    <th class="border border-gray-200 p-3 text-left">成员C</th>
+                    <th class="border border-gray-200 p-3 text-left">成员D</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="border border-gray-200 p-3 font-medium">第一周</td>
+                    <td class="border border-gray-200 p-3 text-xs">
+                      • 工作流引擎框架
+                      <br>
+                      • 剧本理解Agent基础版
+                      <br>
+                      • JSON Schema设计
+                    </td>
+                    <td class="border border-gray-200 p-3 text-xs">
+                      • 角色管理Agent基础版
+                      <br>
+                      • CLIP特征提取集成
+                      <br>
+                      • 角色档案模型
+                    </td>
+                    <td class="border border-gray-200 p-3 text-xs">
+                      • 模型接口抽象
+                      <br>
+                      • ComfyUI部署配置
+                      <br>
+                      • 基础提示词工程
+                    </td>
+                    <td class="border border-gray-200 p-3 text-xs">
+                      • Gradio原型搭建
+                      <br>
+                      • 项目创建界面
+                      <br>
+                      • 基础前端布局
+                    </td>
+                  </tr>
+                  <tr class="bg-gray-50">
+                    <td class="border border-gray-200 p-3 font-medium">第二周</td>
+                    <td class="border border-gray-200 p-3 text-xs">
+                      • 叙事结构识别
+                      <br>
+                      • 长文本处理
+                      <br>
+                      • LLM切换机制
+                    </td>
+                    <td class="border border-gray-200 p-3 text-xs">
+                      • IP-Adapter链式参考
+                      <br>
+                      • 状态追踪系统
+                      <br>
+                      • 角色档案CRUD
+                    </td>
+                    <td class="border border-gray-200 p-3 text-xs">
+                      • 分镜设计Agent实现
+                      <br>
+                      • 布局模板库构建
+                      <br>
+                      • 动态布局算法
+                    </td>
+                    <td class="border border-gray-200 p-3 text-xs">
+                      • 进度监控界面
+                      <br>
+                      • 单帧预览功能
+                      <br>
+                      • 状态可视化
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="border border-gray-200 p-3 font-medium">第三周</td>
+                    <td class="border border-gray-200 p-3 text-xs">
+                      • 输出校验优化
+                      <br>
+                      • 错误处理机制
+                      <br>
+                      • 性能优化
+                    </td>
+                    <td class="border border-gray-200 p-3 text-xs">
+                      • 连续性校验规则
+                      <br>
+                      • 档案库优化
+                      <br>
+                      • 版本管理
+                    </td>
+                    <td class="border border-gray-200 p-3 text-xs">
+                      • 多适配器实现
+                      <br>
+                      • 提示词优化
+                      <br>
+                      • 质量控制集成
+                    </td>
+                    <td class="border border-gray-200 p-3 text-xs">
+                      • 排版合成Agent
+                      <br>
+                      • 完整前端界面
+                      <br>
+                      • 导出功能实现
+                    </td>
+                  </tr>
+                  <tr class="bg-gray-50">
+                    <td class="border border-gray-200 p-3 font-medium">第四周</td>
+                    <td class="border border-gray-200 p-3 text-xs">
+                      • 报告撰写（架构+算法）
+                      <br>
+                      • 对比实验设计
+                      <br>
+                      • 性能测试
+                    </td>
+                    <td class="border border-gray-200 p-3 text-xs">
+                      • 报告撰写（一致性机制）
+                      <br>
+                      • 效果对比分析
+                      <br>
+                      • 创新点总结
+                    </td>
+                    <td class="border border-gray-200 p-3 text-xs">
+                      • 报告撰写（分镜+生成）
+                      <br>
+                      • PPT制作
+                      <br>
+                      • 演示脚本准备
+                    </td>
+                    <td class="border border-gray-200 p-3 text-xs">
+                      • 集成测试
+                      <br>
+                      • Demo脚本编写
+                      <br>
+                      • 最终调试优化
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- Innovation Section -->
+      <section id="innovation" class="mb-16">
+        <h2 class="font-display text-3xl font-bold text-gray-800 mb-8">创新点凝练与展示策略</h2>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-12">
+          <div class="tech-card bg-gradient-to-br from-blue-50 to-blue-100">
+            <h3 class="font-display text-xl font-semibold mb-4 text-blue-700">
+              <i class="fas fa-link mr-2"></i>角色一致性保障
+            </h3>
+            <div class="mb-4">
+              <img src="./漫画创作Agent系统：期末课程项目方案_files/5f0f81ff6833b3833ec4219558b96983c5243514.png" alt="AI漫画角色一致性生成示意图" class="w-full h-32 object-cover rounded-lg" size="medium" aspect="wide" query="AI漫画角色一致性生成" referrerpolicy="no-referrer" data-modified="1" data-score="0.00">
+            </div>
+            <p class="text-sm text-gray-700 mb-3">
+              <strong>参考图像链式传递机制</strong>：在IP-Adapter基础上增加跨面板动态参考选择，通过时间衰减加权计算"动态身份嵌入"。
+            </p>
+            <div class="bg-blue-50 p-3 rounded text-xs">
+              <strong>创新优势：</strong>
+              <br>
+              • 适应角色叙事变化
+              <br>
+              • 减少人工参考图准备
+              <br>
+              • 支持复杂叙事技巧
+            </div>
+          </div>
+
+          <div class="tech-card bg-gradient-to-br from-green-50 to-green-100">
+            <h3 class="font-display text-xl font-semibold mb-4 text-green-700">
+              <i class="fas fa-heart mr-2"></i>叙事感分镜
+            </h3>
+            <div class="mb-4">
+              <img src="./漫画创作Agent系统：期末课程项目方案_files/eb3588b89a8574d7a774ab7304189f4465bcfac0.png" alt="情感曲线与分镜布局关系示意图" class="w-full h-32 object-cover rounded-lg" size="medium" aspect="wide" query="漫画分镜情感曲线" referrerpolicy="no-referrer" data-modified="1" data-score="0.00">
+            </div>
+            <p class="text-sm text-gray-700 mb-3">
+              <strong>基于情感曲线的动态布局算法</strong>：将剧本情感分析结果直接驱动分镜参数调整，实现"有情感"的自动分镜。
+            </p>
+            <div class="bg-green-50 p-3 rounded text-xs">
+              <strong>技术亮点：</strong>
+              <br>
+              • 情感高潮区域大画幅
+              <br>
+              • 低谷区域规整小格子
+              <br>
+              • 转折区域特殊技法
+            </div>
+          </div>
+
+          <div class="tech-card bg-gradient-to-br from-purple-50 to-purple-100">
+            <h3 class="font-display text-xl font-semibold mb-4 text-purple-700">
+              <i class="fas fa-plug mr-2"></i>模型无关架构
+            </h3>
+            <div class="mb-4">
+              <img src="./漫画创作Agent系统：期末课程项目方案_files/780a895b8febdfc1bf61fe943fb6bf9a71b1f598.png" alt="AI模型接口抽象架构图" class="w-full h-32 object-cover rounded-lg" size="medium" aspect="wide" query="AI模型接口抽象架构" referrerpolicy="no-referrer" data-modified="1" data-score="0.00">
+            </div>
+            <p class="text-sm text-gray-700 mb-3">
+              <strong>即插即用的多后端支持</strong>：通过统一抽象接口(UMI)实现不同模型后端的无缝切换。
+            </p>
+            <div class="bg-purple-50 p-3 rounded text-xs">
+              <strong>架构优势：</strong>
+              <br>
+              • 标准化角色控制参数
+              <br>
+              • 自动能力协商
+              <br>
+              • 动态质量-成本权衡
+            </div>
+          </div>
+        </div>
+
+        <!-- Presentation Strategy -->
+        <div>
+          <h3 class="font-display text-2xl font-semibold text-gray-800 mb-6">汇报展示设计</h3>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-3 text-blue-700">
+                <i class="fas fa-play mr-2"></i>现场演示
+              </h4>
+              <p class="text-sm text-gray-700 mb-3">
+                3-5分钟完整流程展示，从一句话Prompt到完整漫画的端到端生成。
+              </p>
+              <div class="space-y-2 text-xs">
+                <div class="bg-blue-50 p-2 rounded">
+                  <strong>演示脚本：</strong>
+                  <br>
+                  "时间旅行者爱情故事，蒸汽朋克风格"
+                </div>
+                <div class="bg-blue-50 p-2 rounded">
+                  <strong>展示要点：</strong>
+                  <br>
+                  • 实时Agent执行过程
+                  <br>
+                  • 角色一致性对比
+                  <br>
+                  • 情感曲线可视化
+                </div>
+              </div>
+            </div>
+
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-3 text-green-700">
+                <i class="fas fa-balance-scale mr-2"></i>对比展示
+              </h4>
+              <p class="text-sm text-gray-700 mb-3">
+                同一剧本不同风格/模型的输出差异，突出系统灵活性和专业性。
+              </p>
+              <div class="space-y-2 text-xs">
+                <div class="bg-green-50 p-2 rounded">
+                  <strong>风格对比：</strong>
+                  <br>
+                  日式少年漫 vs 少女漫
+                  <br>
+                  美漫暗黑风 vs 水墨国风
+                </div>
+                <div class="bg-green-50 p-2 rounded">
+                  <strong>模型对比：</strong>
+                  <br>
+                  SDXL本地 vs DiffSensei
+                  <br>
+                  云端API备用方案
+                </div>
+              </div>
+            </div>
+
+            <div class="tech-card">
+              <h4 class="font-display text-lg font-semibold mb-3 text-purple-700">
+                <i class="fas fa-project-diagram mr-2"></i>技术拆解
+              </h4>
+              <p class="text-sm text-gray-700 mb-3">
+                Agent协作过程的动态可视化，展示工作流执行的有向图。
+              </p>
+              <div class="space-y-2 text-xs">
+                <div class="bg-purple-50 p-2 rounded">
+                  <strong>可视化内容：</strong>
+                  <br>
+                  • 人机协作节点流程
+                  <br>
+                  • 错误恢复降级路径
+                  <br>
+                  • 一致性机制传递链路
+                </div>
+                <div class="bg-purple-50 p-2 rounded">
+                  <strong>展示工具：</strong>
+                  <br>
+                  LangSmith或自定义可视化
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Footer -->
+      <footer class="mt-16 pt-8 border-t border-gray-200">
+        <div class="text-center text-gray-500 text-sm">
+          <p class="mb-2">漫画创作Agent系统 - 计算机图形学课程期末项目方案</p>
+          <p>基于多Agent协作的自动化漫画创作技术方案</p>
+        </div>
+      </footer>
+    </main>
+
+    <script>
+        // Initialize Mermaid
+        mermaid.initialize({ 
+            startOnLoad: true,
+            theme: 'base',
+            themeVariables: {
+                primaryColor: '#e3f2fd',
+                primaryTextColor: '#1a1a1a',
+                primaryBorderColor: '#1e40af',
+                lineColor: '#64748b',
+                secondaryColor: '#f3e5f5',
+                tertiaryColor: '#fff3e0',
+                background: '#ffffff',
+                mainBkg: '#ffffff',
+                secondBkg: '#f8fafc',
+                tertiaryColor: '#f1f5f9',
+                // Enhanced contrast colors for different node types
+                cScale0: '#e3f2fd',
+                cScale1: '#f3e5f5', 
+                cScale2: '#e8f5e8',
+                cScale3: '#fff3e0',
+                cScale4: '#fce4ec',
+                // Text colors for better contrast
+                cScaleLabel0: '#1a1a1a',
+                cScaleLabel1: '#1a1a1a',
+                cScaleLabel2: '#1a1a1a',
+                cScaleLabel3: '#1a1a1a',
+                cScaleLabel4: '#1a1a1a'
+            },
+            flowchart: {
+                useMaxWidth: false,
+                htmlLabels: true,
+                curve: 'basis',
+                padding: 20
+            },
+            stateDiagram: {
+                useMaxWidth: false,
+                padding: 20
+            },
+            classDiagram: {
+                useMaxWidth: false,
+                padding: 20
+            },
+            timeline: {
+                useMaxWidth: false,
+                padding: 20
+            }
+        });
+
+        // Initialize Mermaid Controls for zoom and pan
+        function initializeMermaidControls() {
+            const containers = document.querySelectorAll('.mermaid-container');
+
+            containers.forEach(container => {
+            const mermaidElement = container.querySelector('.mermaid');
+            let scale = 1;
+            let isDragging = false;
+            let startX, startY, translateX = 0, translateY = 0;
+
+            // 触摸相关状态
+            let isTouch = false;
+            let touchStartTime = 0;
+            let initialDistance = 0;
+            let initialScale = 1;
+            let isPinching = false;
+
+            // Zoom controls
+            const zoomInBtn = container.querySelector('.zoom-in');
+            const zoomOutBtn = container.querySelector('.zoom-out');
+            const resetBtn = container.querySelector('.reset-zoom');
+            const fullscreenBtn = container.querySelector('.fullscreen');
+
+            function updateTransform() {
+                mermaidElement.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+
+                if (scale > 1) {
+                container.classList.add('zoomed');
+                } else {
+                container.classList.remove('zoomed');
+                }
+
+                mermaidElement.style.cursor = isDragging ? 'grabbing' : 'grab';
+            }
+
+            if (zoomInBtn) {
+                zoomInBtn.addEventListener('click', () => {
+                scale = Math.min(scale * 1.25, 4);
+                updateTransform();
+                });
+            }
+
+            if (zoomOutBtn) {
+                zoomOutBtn.addEventListener('click', () => {
+                scale = Math.max(scale / 1.25, 0.3);
+                if (scale <= 1) {
+                    translateX = 0;
+                    translateY = 0;
+                }
+                updateTransform();
+                });
+            }
+
+            if (resetBtn) {
+                resetBtn.addEventListener('click', () => {
+                scale = 1;
+                translateX = 0;
+                translateY = 0;
+                updateTransform();
+                });
+            }
+
+            if (fullscreenBtn) {
+                fullscreenBtn.addEventListener('click', () => {
+                if (container.requestFullscreen) {
+                    container.requestFullscreen();
+                } else if (container.webkitRequestFullscreen) {
+                    container.webkitRequestFullscreen();
+                } else if (container.msRequestFullscreen) {
+                    container.msRequestFullscreen();
+                }
+                });
+            }
+
+            // Mouse Events
+            mermaidElement.addEventListener('mousedown', (e) => {
+                if (isTouch) return; // 如果是触摸设备，忽略鼠标事件
+
+                isDragging = true;
+                startX = e.clientX - translateX;
+                startY = e.clientY - translateY;
+                mermaidElement.style.cursor = 'grabbing';
+                updateTransform();
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (isDragging && !isTouch) {
+                translateX = e.clientX - startX;
+                translateY = e.clientY - startY;
+                updateTransform();
+                }
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (isDragging && !isTouch) {
+                isDragging = false;
+                mermaidElement.style.cursor = 'grab';
+                updateTransform();
+                }
+            });
+
+            document.addEventListener('mouseleave', () => {
+                if (isDragging && !isTouch) {
+                isDragging = false;
+                mermaidElement.style.cursor = 'grab';
+                updateTransform();
+                }
+            });
+
+            // 获取两点之间的距离
+            function getTouchDistance(touch1, touch2) {
+                return Math.hypot(
+                touch2.clientX - touch1.clientX,
+                touch2.clientY - touch1.clientY
+                );
+            }
+
+            // Touch Events - 触摸事件处理
+            mermaidElement.addEventListener('touchstart', (e) => {
+                isTouch = true;
+                touchStartTime = Date.now();
+
+                if (e.touches.length === 1) {
+                // 单指拖动
+                isPinching = false;
+                isDragging = true;
+
+                const touch = e.touches[0];
+                startX = touch.clientX - translateX;
+                startY = touch.clientY - translateY;
+
+                } else if (e.touches.length === 2) {
+                // 双指缩放
+                isPinching = true;
+                isDragging = false;
+
+                const touch1 = e.touches[0];
+                const touch2 = e.touches[1];
+                initialDistance = getTouchDistance(touch1, touch2);
+                initialScale = scale;
+                }
+
+                e.preventDefault();
+            }, { passive: false });
+
+            mermaidElement.addEventListener('touchmove', (e) => {
+                if (e.touches.length === 1 && isDragging && !isPinching) {
+                // 单指拖动
+                const touch = e.touches[0];
+                translateX = touch.clientX - startX;
+                translateY = touch.clientY - startY;
+                updateTransform();
+
+                } else if (e.touches.length === 2 && isPinching) {
+                // 双指缩放
+                const touch1 = e.touches[0];
+                const touch2 = e.touches[1];
+                const currentDistance = getTouchDistance(touch1, touch2);
+
+                if (initialDistance > 0) {
+                    const newScale = Math.min(Math.max(
+                    initialScale * (currentDistance / initialDistance),
+                    0.3
+                    ), 4);
+                    scale = newScale;
+                    updateTransform();
+                }
+                }
+
+                e.preventDefault();
+            }, { passive: false });
+
+            mermaidElement.addEventListener('touchend', (e) => {
+                // 重置状态
+                if (e.touches.length === 0) {
+                isDragging = false;
+                isPinching = false;
+                initialDistance = 0;
+
+                // 延迟重置isTouch，避免鼠标事件立即触发
+                setTimeout(() => {
+                    isTouch = false;
+                }, 100);
+                } else if (e.touches.length === 1 && isPinching) {
+                // 从双指变为单指，切换为拖动模式
+                isPinching = false;
+                isDragging = true;
+
+                const touch = e.touches[0];
+                startX = touch.clientX - translateX;
+                startY = touch.clientY - translateY;
+                }
+
+                updateTransform();
+            });
+
+            mermaidElement.addEventListener('touchcancel', (e) => {
+                isDragging = false;
+                isPinching = false;
+                initialDistance = 0;
+
+                setTimeout(() => {
+                isTouch = false;
+                }, 100);
+
+                updateTransform();
+            });
+
+            // Enhanced wheel zoom with better center point handling
+            container.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const rect = container.getBoundingClientRect();
+                const centerX = rect.width / 2;
+                const centerY = rect.height / 2;
+
+                const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                const newScale = Math.min(Math.max(scale * delta, 0.3), 4);
+
+                // Adjust translation to zoom towards center
+                if (newScale !== scale) {
+                const scaleDiff = newScale / scale;
+                translateX = translateX * scaleDiff;
+                translateY = translateY * scaleDiff;
+                scale = newScale;
+
+                if (scale <= 1) {
+                    translateX = 0;
+                    translateY = 0;
+                }
+
+                updateTransform();
+                }
+            });
+
+            // Initialize display
+            updateTransform();
+            });
+        }
+
+        // Call the function to initialize mermaid controls
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeMermaidControls();
+        });
+
+        // Smooth scrolling for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+
+        // Highlight active section in TOC
+        function updateActiveTOC() {
+            const sections = document.querySelectorAll('section[id]');
+            const tocLinks = document.querySelectorAll('.toc-fixed a');
+            
+            let currentSection = '';
+            sections.forEach(section => {
+                const rect = section.getBoundingClientRect();
+                if (rect.top <= 100 && rect.bottom >= 100) {
+                    currentSection = section.id;
+                }
+            });
+            
+            tocLinks.forEach(link => {
+                link.classList.remove('bg-blue-100', 'text-blue-800');
+                if (link.getAttribute('href') === `#${currentSection}`) {
+                    link.classList.add('bg-blue-100', 'text-blue-800');
+                }
+            });
+        }
+
+        window.addEventListener('scroll', updateActiveTOC);
+        updateActiveTOC(); // Initial call
+    </script>
+  
+
+
+  <div class="kimi-brand-container">
+    <div class="kimi-brand-close-icon">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12.499 3.50216C12.7226 3.72574 12.7226 4.08825 12.499 4.31184L8.81035 8.00029L12.4972 11.6872C12.7208 11.9107 12.7208 12.2733 12.4972 12.4968C12.2736 12.7204 11.9111 12.7204 11.6875 12.4968L8.00066 8.80998L4.31221 12.4986C4.10582 12.705 3.78106 12.7209 3.55646 12.5463L3.50252 12.4986C3.27893 12.2751 3.27893 11.9126 3.50252 11.689L7.19098 8.00029L3.50107 4.31038C3.27748 4.0868 3.27748 3.72429 3.50107 3.5007C3.72465 3.27711 4.08716 3.27711 4.31075 3.5007L8.00066 7.19061L11.6893 3.50216C11.8957 3.29577 12.2205 3.27989 12.4451 3.45453L12.499 3.50216Z" fill="white" fill-opacity="0.84"></path>
+      </svg>
+    </div>
+
+    <a href="https://www.kimi.com/deep-research" target="_blank" class="kimi-brand-link">
+      <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADgAAAA4CAYAAACohjseAAAACXBIWXMAABYlAAAWJQFJUiTwAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAsHSURBVHgB1ZpJTFRfFsYvlPNYOM8WzjPgFGfBIbIwihuXSi/c9EY6veyFQy9cddC4sHujbFyYaOLfaKKJCUQTo4kKGGOcLUdwpJxRxNfnd+RUHuUroGS+yc199d4dzne+M9x7Ic01XyJSC6RmNTxHGt6HG2pHlFhCrZBaKbVMatT9YcmVWirV6+IVGbNdiqXYOdfZgqdai10LCiZX7jpf2D+t5a4Zt+nO4PwgA0t3NMtGNS0tTasLMNfsrix4KgDT09P1uU+fPrl+gKVdWfBUANpzKBQqBVia+5XXHrluXgSc8zwv/kyR35k93K981+2LgfM/z549uyDd/UGS7IzSJ2e7G/GvGjfy354b+vdyF8qIJO3bo0cPZbGmpiYLLrHVXNeFSygcccP+2diL6mNR9+Y/mY3eSYBR9nr37u1qa2t5VQaDHbWf/OPSd37hb+8A3XN0Y+ODOcABlBIOhyP4YJcH2NLy48eP+DNA379/77otwNryEldXVdHoXa9evVzPnj0VKCYqv8OtBrhr1y4XiUTivysrK93+/ftbPD47O9vt3Lkz8NuePXtcNBp19TVRVxct03c/a2PuR1Wl+3Lp9zV+/vzpvn375r5//66/Bw0apNhalVwfPXrk+UtpaWmLxwo4TyKdF1R2796dNIm7FiR62cnYc+cAbCk43/6yEYjE99QBAwY0+j5mzJjOAZgqc7LtapKtoDp06NDOYbA5cH4GgkD5ATfFrm9cxwFsCXN2Gkisyd5bHTlypN/vFGRGRkbHAWwNc36AiUCNUfzNZ5b+edofYCo+11SVHKet7Fg0oPAMOH4DyACOGzfO69evn4FsX4C5ubltAq6pCjBADRkyxBs4cKA3Z84cP4vtB3D79u1estJW4MxsDeCoUaPi4NoVYHuC86cN80HA8dy/f//E/m0PMBVw+A8MNBcl/WxZS5UTgzdx4kQFlhigeMdetE2L+JzWZMWOMlb8J4CWFPab/hKLxdyECRPc58+fdYPdt29f9+XLFz3wCkDt06YMtqQwRjboXmvXpuJzw4cP15YoKycIZdYXVTseIIXIWlRU1GqAliZox44dqymJFrC0je2lHQrHnaAivuOKi4vdkSNHGh23UimYu4DQVvKimuXr16+dMOokqrqlS5dqv3ZjsLy8XINAQUFBk/34Nn/+/JTXxgyJnmzJRo8e7S1fvtzLysrSXc26deu88ePHtx+DFRUVLi8vT4PAyZMn9bmsrCywLwxeu3ZND8+pFNGNq6+vd3V1dRpcKDD49etXvbIQs/3Vz6WoNX84DmLGmAsaT5poqjCWAOS/hm+qEkhgjyCzYsUKb/HixZ6YprdgwQIvMzMz9SBjC9viiQD5nQycVQJBc8GJfFpYWNjohGDVoiQte05hz5PrCW/z5s3epk2bFBhAZ86c+Qtg0Ok4CJh/ASJXEMDmzoOMQ2gWLykp8ZorREPWo2WcrS0mqNX2nzCI74krqAVYRE3HTrFlz3f1nczeg55TLSR20bq7c+eO27Fjh9u7d2+T/fEtYUd9iogpgDRiMseUKVM0qQtAjaQk+3fv3qnvye7GSfBx6QjLR/8Ow/54QeG9/7cVnDvofbJi83M5i1AUhAYggj579ixw3IwZM/Q6EBCsJ/4WH/vmzRsnkVLTwocPHxTYgwcP3Nu3b52wrTd86fZXGQNiQiduqeyb1VRZZIvFnSXzohx+f/r0SZ/FzN2iRYvcvn37fsub/FYmGkjgWnDw4MEaOadPn+4kLWikJq+K2WuLEtim0S8kwu42gLRBAOy9tf4iOU5bFqEi0LFjx5KCRMswgoD++QF78eJFd/z4cffkyRMFTsgntUybNk3fISO31QDATJnn/v37CgoL4D4UMyYlXbhwwUmEdWkNR484g/6F/QK4ACYROBUmWQOAxmCyMm/ePP4ypLsRwF26dEl9lzURmnnmzp3rqqqqFBiKBSyb7UmTJql/ss7NmzddSMymSOy1DxMgLB0RwID5TTeRST/jQf6Y+I7+TSkFv0EwEjV+iv9hvgQPFM93WtmxKFtm7vQHHCbJTbmZsrSxHtIhJiDDdKIwwMzV/NBMi8qzKcD6UQgeKMnGGHjr2xJ26U8wQRZJ1Ary48eP7tWrV/H9Jetjunfv3o3vVmhhDnb5hiIaru9j6fJXUEVOJbQSkgnNLMZgOrO4P0gkBiJrTQF+VpMFq8TCuhSExcQkr6lf4mvUYcOGKQBM8unTp6oElIhSAcO6jCWNoBD6Co5YSKgtkAkjhFnsHo1TAUnLBIA0EzIhAWMMonUWie/9fOzbbyv211fP9/d0wPGeyEfLOsjz/PlzlQFzw3VIJw8fPozvPWkJOigEhkkPyGAmLYTcDkmYzbt371721KlTtSOaYREzVzRjDDLI8p/Zv7UmPM8mPGMsmJgyrNIXi8ByZAeiwgMCBkgLL168iJ/KzfQomC3j8DnkhV3G0w9gyE/qIEfKdu2vkDxEZFw+H5iQkIv2WMzOWCtXrtSJmYDCAnznG4rhPUxjIijBANguKcjX0PiIESN0PJoHAH15Zn2CBYWTBqlAbq4VBH0wUcA9fvxYE70RwpywDRZyovjv/4ii1UJ3ERpB+9xvsN0BBKaHRhnEOxawKIvD2zbJTBTlEBTMBM1UEYaWsRT6EQlv3bqlc8MYSmKsKYk1TCb8jjlZEwVMnjxZ5yTnYd74J6kEa0EWNg0EHbkb+kdINB/buHFjrvhfhIVwbAbQUY4f6g9Xr15VDQKSgQDFkclRCI3mYAsWaJmHfigA4AQM5kMogGGO1dXVqoANGza469ev69woAd9iPKwAlLUAjiJQNuwQDO0WAIW8fPnSbdmyRZnHKgAuc5fJuwMaFcRWHwuYQjRL3mEwpoMDY3oIx6RyY6yL0o9nObspCLQM4wgBaEAilMyrLGzdutUtXLhQNY8wCIDi7E/OsEJFWECzPsLCHDsYFE4yx2VQGL/xXdtsAFziiMqJ8hry7ZZz585VK0A5fUflLJUhwi9hG8RCMIZGAThr1izdgjEBi6N9FIB5wA5aJwLzDfCMx29hDMFhm28AR2DYQXj6nj17VkHDFH7HOnxDcVRAoTha1kWZzIWCbty4oYBhnDV45vv58+cPyF1PiUZpfwCQv4mXi+azERjB0DCAMYvTp087MWV1cEL1qlWr3KlTp5RZki7bKxYFHBpGOHwGJjF73sMKoOnPOK41Ll++rBqHXSzGoiXsMB/C8y4/P1/nxSIAivKZE4uDBLnT0flkXIUAzzFMIT9A6XBs27Zt+SLQKDQC9Rw58Bt8hAAEAwjJPpDdBgLAHqEcQAiG/wGYDe+yZcvi/xiAIPSnn1kESqQvfZgTk8X8+cY7TC4nJ0ef8S8YX79+vRKA2ZIrbX8q81SsXbs2T0yz1jAFHugOHTq0Xybcib+hLSZGaDQEYMwPFgGKD9CiDNhCy7CDsHKz5U6cOKE5CUERmvNaw79ZafhfvXq1O3z4sAYqi6qsixnzDoUwzvyTZ0yd78zBO1zl9u3bB0S+okQsoSCAZ86cOStns7/ELGeIhiJoh4lZzPIQQQPzNbNbs2aNAiT/4L/4AlbAOHwYYSmYFN9hk5bxgKIv1gHTzEcQwS9hmnzHeDsYMw458F0x7bKjR4/+TTYG/w3C0uyRXO5YIgcPHsyVM1a2CJAlwSUsmg+LzYdFY+ElS5ZossWXEJpDKOYM66JVBYgi8DtMij5EX7kYUs1zBuQbwiYey4wpUVBMLCiGtYibRGXeqMxTeeXKlZMyZ7Qp+f8PFfwmm2H/qgMAAAAASUVORK5CYII=" alt="Kimi" class="kimi-brand-avatar">
+      <span>Kimi 深度研究</span>
+      <svg width="16" height="16" class="kimi-brand-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path fill-rule="evenodd" clip-rule="evenodd" d="M14.2925 8.54311C14.5253 8.30855 14.5247 7.92983 14.2909 7.69611L10.5986 4.00381C10.3643 3.76949 9.98442 3.76949 9.7501 4.00381C9.51579 4.23812 9.51579 4.61802 9.7501 4.85233L12.4181 7.52038H1.86667C1.5353 7.52038 1.26667 7.78901 1.26667 8.12038C1.26667 8.45175 1.5353 8.72038 1.86667 8.72038H12.4255L9.74857 11.4167C9.51511 11.6519 9.51648 12.0318 9.75164 12.2652C9.9868 12.4987 10.3667 12.4973 10.6002 12.2622L14.2925 8.54311Z" fill="white" fill-opacity="0.84"></path>
+      </svg>
+    </a>
+  </div>
+    <div class="mermaidTooltip" style="opacity: 0;"></div></body></html>
