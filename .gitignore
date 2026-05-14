@@ -1,0 +1,58 @@
+# Existing rules
+docs
+.claude
+CLAUDE.md
+memory/
+.playwright-mcp/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+pip-wheel-metadata/
+
+# Virtual envs
+venv/
+.venv/
+env/
+.env
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# ComicWeaver runtime
+projects/
+cache/
+outputs/
+*.log
+models/
+*.bin
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+
+# Gradio
+flagged/
+gradio_cached_examples/
