@@ -55,3 +55,11 @@ models/
 # Gradio
 flagged/
 gradio_cached_examples/
+
+
+.arts/
+.codeartsdoer/
+output/
+workflow_api.json
+
+
