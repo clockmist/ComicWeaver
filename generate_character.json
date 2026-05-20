@@ -1,0 +1,144 @@
+{
+  "3": {
+    "inputs": {
+      "seed": 308098038595132,
+      "steps": 30,
+      "cfg": 6,
+      "sampler_name": "euler_ancestral",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "4",
+        0
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "latent_image": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "4": {
+    "inputs": {
+      "ckpt_name": "IL-novaOrangeXL_v100.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Checkpoint加载器（简易）"
+    }
+  },
+  "5": {
+    "inputs": {
+      "width": 832,
+      "height": 1216,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "空Latent图像"
+    }
+  },
+  "6": {
+    "inputs": {
+      "text": [
+        "37",
+        0
+      ],
+      "clip": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "7": {
+    "inputs": {
+      "text": "lowres, worst quality, bad quality, bad anatomy, simple background, blurry, lowres, cropped, extra limbs, bad anatomy, deformed hands, bad face, sketch, jpeg artifacts, signature, watermark, old, oldest, ",
+      "clip": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "8": {
+    "inputs": {
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "33": {
+    "inputs": {
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "37": {
+    "inputs": {
+      "separator": "",
+      "text1": [
+        "38",
+        0
+      ],
+      "text2": [
+        "39",
+        0
+      ]
+    },
+    "class_type": "CR Text Concatenate",
+    "_meta": {
+      "title": "🔤 CR Text Concatenate"
+    }
+  },
+  "38": {
+    "inputs": {
+      "prompt": "masterpiece, best quality, ultra high res, hyper-detailed, anime realism, 8K, newest, "
+    },
+    "class_type": "CR Prompt Text",
+    "_meta": {
+      "title": "前缀可修改"
+    }
+  },
+  "39": {
+    "inputs": {
+      "prompt": "1girl, solo, looking_at_viewer, blush, smile, short_hair, simple_background, white_background, closed_mouth, yellow_eyes, white_hair, medium_hair, dark_skin, dark-skinned_female, head_tilt, hair_intakes, portrait, long_eyelashes"
+    },
+    "class_type": "CR Prompt Text",
+    "_meta": {
+      "title": "⚙️ CR Prompt Text"
+    }
+  }
+}
