@@ -1,7 +1,7 @@
 {
   "3": {
     "inputs": {
-      "seed": 308098038595132,
+      "seed": 273583436515988,
       "steps": 30,
       "cfg": 6,
       "sampler_name": "euler_ancestral",
@@ -40,8 +40,8 @@
   },
   "5": {
     "inputs": {
-      "width": 832,
-      "height": 1216,
+      "width": 1024,
+      "height": 1024,
       "batch_size": 1
     },
     "class_type": "EmptyLatentImage",
@@ -51,10 +51,7 @@
   },
   "6": {
     "inputs": {
-      "text": [
-        "37",
-        0
-      ],
+      "text": "masterpiece, best quality, ultra high res, hyper-detailed, anime realism, 8K, newest,1girl, solo, looking at viewer, fighting stance, holding sword, hand up, arm extended, weapon raised, outdoors, battlefield, sunset, dramatic lighting, wind, cape fluttering, intense expression, anime style, detailed background",
       "clip": [
         "4",
         1
@@ -67,7 +64,7 @@
   },
   "7": {
     "inputs": {
-      "text": "lowres, worst quality, bad quality, bad anatomy, simple background, blurry, lowres, cropped, extra limbs, bad anatomy, deformed hands, bad face, sketch, jpeg artifacts, signature, watermark, old, oldest, ",
+      "text": "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, bad feet, mutation, deformed, extra limbs, extra arms, extra legs, malformed limbs, fused fingers, too many fingers, long neck, cross-eyed, mutated hands, polar lowres, bad face, photorealistic, 3d render, realistic, western comic style\n",
       "clip": [
         "4",
         1
@@ -94,51 +91,17 @@
       "title": "VAE解码"
     }
   },
-  "33": {
+  "9": {
     "inputs": {
+      "filename_prefix": "IPAdapter",
       "images": [
         "8",
         0
       ]
     },
-    "class_type": "PreviewImage",
+    "class_type": "SaveImage",
     "_meta": {
-      "title": "预览图像"
-    }
-  },
-  "37": {
-    "inputs": {
-      "separator": "",
-      "text1": [
-        "38",
-        0
-      ],
-      "text2": [
-        "39",
-        0
-      ]
-    },
-    "class_type": "CR Text Concatenate",
-    "_meta": {
-      "title": "🔤 CR Text Concatenate"
-    }
-  },
-  "38": {
-    "inputs": {
-      "prompt": "masterpiece, best quality, ultra high res, hyper-detailed, anime realism, 8K, newest, "
-    },
-    "class_type": "CR Prompt Text",
-    "_meta": {
-      "title": "前缀可修改"
-    }
-  },
-  "39": {
-    "inputs": {
-      "prompt": "1girl, solo, looking_at_viewer, blush, smile, short_hair, simple_background, white_background, closed_mouth, yellow_eyes, white_hair, medium_hair, dark_skin, dark-skinned_female, head_tilt, hair_intakes, portrait, long_eyelashes"
-    },
-    "class_type": "CR Prompt Text",
-    "_meta": {
-      "title": "⚙️ CR Prompt Text"
+      "title": "保存图像"
     }
   }
 }
