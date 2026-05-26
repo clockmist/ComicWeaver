@@ -4,23 +4,25 @@
 
 #### 1.1 generate_character.json
 
-ComfyUI中生成角色的工作流配置，由于是直接复制别人的工作流，所以存在一些多余的节点，后续可修改
+​	ComfyUI中生成角色的工作流配置。简单的checkpoint加上正面，负面提示词再加上K采样器。
+
+
 
 #### 1.2 generate_picture.json
 
-ComfyUI中生成最终图片的工作流。目前只使用了ip adapter。但是效果不是很好，可能是工作流也可能是prompt的问题
+​	ComfyUI中生成最终图片的工作流。目前只使用了ip adapter。但是效果不是很好，可能是工作流也可能是prompt的问题
 
-#### 1.3 test.py/test_api.py
 
-测试各种接口的连接，无其他作用
 
-#### 1.4 test_agent.py/test_agent_2.py
+#### 1.3 comic_agent.py
 
-由ai生成的整个agent框架，使用了langgraph，并调用了comfyUI。由于是ai生成，效果方面不是很好，后续需要人为写一些代码，从而对prompt进行更加精细的控制。
+​	目前新写的agent工作流，虽然简陋但是能够跑通。输入是一段故事描述（由于模型限制最好将性别固定为女，更改模型后可能会好一点），输出是人设图和多张人物相关的图片。
 
-#### 1.5 comic_agent.py
+​	整体框架采用langgraph, 生成图片是通过http发送给ComfyUI进行生图任务。目前只实现了5个agent：剧本生成agent, 角色人设生成agent，角色人设图生成agent，分镜prompt生成agent和漫画图片生成agent。
 
-目前新写的agent工作流，虽然简陋但是能够跑通。输入是一段故事描述（由于模型限制最好将性别固定为女，更改模型后可能会好一点），输出是人设图和多张人物相关的图片
+
+
+
 
 ### 2. 项目配置
 
@@ -30,22 +32,38 @@ ComfyUI中生成最终图片的工作流。目前只使用了ip adapter。但是
 
 #### 2. ComfyUI
 
-需要下载模型，照理说只要是checkpoints类型的就能够跑起来，但是不同的模型超参数一般是不同的，目前使用的文生图模型是IL-novaOrangeXL_v100.safetensors。
+**后续ComfyUI处可能需要大量地修改模型和配置**
 
-除此之外，需要安装插件ComfyUI_IPAdapter_plus，以及相对应的CLIP，IPAdapter模型，目前采用的是CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors和ip-adapter-faceid-plusv2_sdxl.bin。然后根据`https://github.com/cubiq/ComfyUI_IPAdapter_plus`中的说明配置`insightface`。
+​	目前运行项目需要下载模型，照理说只要是checkpoints类型的就能够跑起来，但是不同的模型超参数一般是不同的，目前使用的文生图模型是`IL-novaOrangeXL_v100.safetensors`。
 
-后续ComfyUI处可能需要大量地修改模型和配置
+​	除此之外，需要安装插件ComfyUI_IPAdapter_plus，以及相对应的CLIP，IPAdapter模型，目前采用的是`CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors`和`ip-adapter-faceid-plusv2_sdxl.bin`。然后根据`https://github.com/cubiq/ComfyUI_IPAdapter_plus`中的说明配置`insightface`。
 
-### 3. 修改过程（已修改完成）
 
-目前test_agent中存在的问题：
 
-1. 代码长度太长了，有些地方根本没必要这么长，例如我们假定一定使用的是langgraph框架，不用考虑没有langgraph的情况，这样子我们就能用langgraph的state在节点间传递信息，从而节省很多代码(一些非必要的分支语句也能删了)
-2. 如果一些地方报错，目前代码的逻辑是加入一些默认的输出，但是真实agent这样子做会违反客户的需求，如果输出格式不符合，现阶段直接报错就行了（后续可能会使用其他方式进行管理）
-3. agent逻辑不清晰，目前处在开发初期，我们完全不需要最后两个agent，即质量控制agent和排版agent。风格agent我们也不需要，先固定成generate_character.json中38号节点里面的masterpiece, best quality, ultra high res, hyper-detailed, anime realism, 8K, newest即可。其他agent也能简化，我们需要的基本上就是剧本解析agent（将用户输入扩充成剧本，自然语言描述人物，以及最后生成几张图，和图里面的内容），角色prompt生成agent（将角色的自然语言描述改成角色prompt），角色人设生成prompt(人设图是半身像或者胸像，需要保证整个头部出现在画面里面)，分镜生成prompt(根据自然语言描述，生成背景，人物姿势，镜头视角等相关prompt),画面生成agent（根据prompt，和人设图用ipadapter生成最终的画面）
+### 3. 项目难点和后续工作
 
-### 4. 后续工作
+1. 人物一致性：
 
-1. 寻找更加稳定地保持人物一致性的方法，现在只是简单的使用了ipadapter和固定种子
-2. 或许大家可以各自试试各种模型看看哪一种效果最好
-3. 优化整体agent工作流，即尝试在prompt层面更好地控制画面，以及加入排版agent和加入台词agent
+   目前我们保持任务一致性的方法是使用ipadapter加上固定种子。调研到为了保持人物一致性一般是采用三种方法：IPAdapter, ControlNet和LoRA。LoRA训练起来比较麻烦，感觉不太适合agent这种偏轻量级的任务；而尝试IPAdapter多次发现效果不是很好；还未尝试过 ControlNet。
+
+   ​	后续工作：可以将生成图片风格改成黑白漫画风，这样子能在视觉层面降低一致性的要求，也能试试不同模型看看效果。更进一步可以探索更稳定的模型以及主流的工作流以及探索ControlNet效果。
+
+   
+
+2. 排版agent：
+
+​	目前完全没有对于排版的实现，初步思路是由剧本生成agent，或者新建一个agent先安排好一页漫画里面所有图片的位置，待漫画图	片生成agent生成结果之后组装图片。而组装可以调用ComfyUI中的`CR Comic Panel Templates`实现，也可以调python库尝试手动	实现。
+
+
+
+	3. 台词agent：
+
+​	有两种想法：一种是在生成图片的时候用prompt控制画面的重心在什么位置，后续就把台词放在重心的另一面；另一种方法是利用动	漫人脸识别模型，例如`yolov5-anime` 或 `yolov8-animeface`（但是它们的训练集应该是彩色图片），只要台词不遮挡住人脸就行了	。以及如果和排版agent配合得好的话，在画框外新生成一个框放台词也是可行的。
+
+
+
+### 4. 项目重点
+
+​	经过调研，现在一些模型加上LoRA或者一些全新的模型（例如diffsensei）能够很好地生成漫画了。那我认为我们项目的重点要放在生成过程整体的可控性，就像`src`文件夹里面那个框架一样，要让用户在整个生成过程中能及时介入并提供生成的建议，并驳回不满意的生成。
+
+​	除此之外，漫画生成这一块，之前大多是关于人物一致性的研究。如果把排版加上台词生成处理好的话这个项目应该也能有所创新性。在agent层面上，可以加入一些外接知识库，让LLM生成更优质的prompt指导生图。
