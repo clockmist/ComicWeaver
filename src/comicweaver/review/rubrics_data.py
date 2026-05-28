@@ -1,7 +1,7 @@
 """审查Rubric数据 - 基于 docs/agents/06-reviewer-agent.md。"""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass

@@ -1,13 +1,15 @@
-"""剧本理解 Agent - Mock 实现。
+"""Script understanding agent.
 
-真实实现将调用 LLM,本Mock基于规则生成可信的虚假数据,
-便于联调与前端演示。
+The agent prefers a configured JSON LLM API and falls back to a deterministic
+local generator when no backend is configured.
 """
 from __future__ import annotations
 
+import asyncio
 import random
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
+from comicweaver.api import ApiBackendError, OpenAICompatibleLLMClient
 from comicweaver.core import (
     AgentContext,
     AgentOutputMeta,
@@ -23,7 +25,6 @@ from comicweaver.core import (
     StreamEventType,
 )
 
-
 _MOCK_CHARACTERS = [
     ("林染", "protagonist", "黑色短发,蓝色眼睛,白衬衫黑外套", "好奇心强,坚定"),
     ("陈夜", "antagonist", "灰色长发,黄色瞳孔,黑色长袍", "神秘,深谋远虑"),
@@ -36,15 +37,54 @@ _MOCK_ATMOSPHERES = ["阴郁压抑", "紧张悬疑", "温暖怀旧", "明亮欢�
 
 
 class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
-    """剧本理解 Agent (Mock)."""
+    """Script understanding agent."""
 
     name = "script_agent"
-    version = "0.1.0-mock"
+    version = "0.2.0-api"
     rubric_id = "rubric_script_v1"
 
     async def run(self, inputs: ScriptInput, context: AgentContext) -> ScriptOutput:
+        if self.config.llm.is_available:
+            try:
+                return await self._run_api(inputs, context)
+            except ApiBackendError:
+                if not self.config.runtime.fallback_to_local:
+                    raise
+        return await self._run_local(inputs, context)
+
+    async def _run_api(self, inputs: ScriptInput, context: AgentContext) -> ScriptOutput:
+        client = OpenAICompatibleLLMClient(self.config.llm)
+        payload = {
+            "task": "generate_structured_comic_script",
+            "input_schema": ScriptInput.model_json_schema(),
+            "output_schema": ScriptOutput.model_json_schema(),
+            "input": inputs.model_dump(mode="json"),
+            "context": context.model_dump(mode="json"),
+            "requirements": [
+                "Return JSON only.",
+                "Use stable char_id and scene_id values.",
+                "Create an emotion_curve with one value per scene.",
+                "Keep scenes visually actionable for comic panels.",
+            ],
+        }
+        data = await asyncio.to_thread(
+            client.complete_json,
+            "You generate structured comic scripts for ComicWeaver.",
+            payload,
+        )
+        output = ScriptOutput.model_validate(data)
+        return output.model_copy(update={
+            "meta": AgentOutputMeta(
+                agent=self.name,
+                version=self.version,
+                inputs_hash=self._inputs_hash(inputs),
+                retry_count=context.retry_count,
+                self_check_notes=[f"LLM API provider: {self.config.llm.provider}"],
+            )
+        })
+
+    async def _run_local(self, inputs: ScriptInput, context: AgentContext) -> ScriptOutput:
         """根据用户输入构造一个可信的虚假剧本。"""
-        # 模拟LLM思考耗时
         await self._sleep_for_demo(0.3)
 
         # 选取角色数量(2-3)
@@ -117,7 +157,7 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
                 retry_count=context.retry_count,
                 self_check_notes=[
                     f"生成{n_scenes}场景,{len(characters)}角色",
-                    "Mock实现,实际质量取决于LLM",
+                    "本地规则后端,可通过配置切换到 LLM API",
                 ],
             ),
         )

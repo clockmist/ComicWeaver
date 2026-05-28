@@ -1,4 +1,4 @@
-"""测试 5 个生产 Agent 的 Mock 实现。"""
+"""测试 5 个生产 Agent 的默认本地 fallback。"""
 import pytest
 
 from comicweaver.agents import (

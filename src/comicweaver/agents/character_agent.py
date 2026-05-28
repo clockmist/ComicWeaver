@@ -1,12 +1,10 @@
-"""角色管理 Agent - Mock 实现。
-
-真实实现: CLIP特征提取 + IP-Adapter + FAISS索引。
-Mock: 用占位图像与确定性权重计算。
-"""
+"""Character management agent with image API integration hooks."""
 from __future__ import annotations
 
-from typing import AsyncIterator
+import asyncio
+from collections.abc import AsyncIterator
 
+from comicweaver.api import ApiBackendError, ComfyUIImageClient, ImageGenerationRequest
 from comicweaver.core import (
     AgentContext,
     AgentOutputMeta,
@@ -27,10 +25,10 @@ from comicweaver.storage.placeholder import generate_character_placeholder
 
 
 class CharacterAgent(BaseAgent[CharacterInput, CharacterOutput]):
-    """角色管理 Agent (Mock)."""
+    """Character management agent."""
 
     name = "character_agent"
-    version = "0.1.0-mock"
+    version = "0.2.0-api"
     rubric_id = "rubric_character_v1"
 
     async def run(self, inputs: CharacterInput, context: AgentContext) -> CharacterOutput:
@@ -49,12 +47,7 @@ class CharacterAgent(BaseAgent[CharacterInput, CharacterOutput]):
         profiles: dict[str, CharacterProfile] = {}
 
         for draft in drafts:
-            ref_path = generate_character_placeholder(
-                project_id=context.project_id,
-                char_id=draft.char_id,
-                name=draft.name,
-                appearance=draft.appearance,
-            )
+            ref_path = await self._reference_image_path(draft, context, inputs.style_preset)
             profiles[draft.char_id] = CharacterProfile(
                 char_id=draft.char_id,
                 name=draft.name,
@@ -86,10 +79,48 @@ class CharacterAgent(BaseAgent[CharacterInput, CharacterOutput]):
             ),
         )
 
+    async def _reference_image_path(
+        self,
+        draft: CharacterDraft,
+        context: AgentContext,
+        style_preset: str | None,
+    ) -> str:
+        if self.config.image.is_available:
+            request = ImageGenerationRequest(
+                project_id=context.project_id,
+                kind="character_reference",
+                prompt=(
+                    f"{style_preset or context.style_preset} character reference sheet, "
+                    f"name: {draft.name}, appearance: {draft.appearance}, "
+                    f"personality: {draft.personality}"
+                ),
+                width=768,
+                height=1024,
+                workflow_path=self.config.image.workflow_character_path,
+                metadata={"char_id": draft.char_id, "name": draft.name},
+            )
+            try:
+                response = await asyncio.to_thread(
+                    ComfyUIImageClient(self.config.image).submit,
+                    request,
+                )
+                if response.image_path:
+                    return response.image_path
+            except ApiBackendError:
+                if not self.config.image.fallback_to_placeholder:
+                    raise
+
+        return generate_character_placeholder(
+            project_id=context.project_id,
+            char_id=draft.char_id,
+            name=draft.name,
+            appearance=draft.appearance,
+        )
+
     async def _build_window(
         self, inputs: CharacterInput, context: AgentContext
     ) -> CharacterOutput:
-        """构造链式参考窗口 - Mock 版本只用 base_reference。"""
+        """构造链式参考窗口 - 本地版本只用 base_reference。"""
         await self._sleep_for_demo(0.05)
 
         windows: dict[str, ReferenceWindow] = {}

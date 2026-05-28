@@ -6,11 +6,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, Generic, Optional, TypeVar
+from collections.abc import AsyncIterator
+from typing import Generic, TypeVar
 
 from pydantic import BaseModel
+
+from comicweaver.config import AppConfig, load_config
 
 from .schema import (
     AgentContext,
@@ -33,8 +35,13 @@ class BaseAgent(ABC, Generic[TIn, TOut]):
     version: str = "0.0.0"
     rubric_id: str = "rubric_unknown"
 
-    def __init__(self, stream_callback: Optional[StreamCallback] = None):
+    def __init__(
+        self,
+        stream_callback: StreamCallback | None = None,
+        config: AppConfig | None = None,
+    ):
         self._stream_callback = stream_callback
+        self.config = config or load_config()
 
     # ---------- 必须实现 ----------
 
@@ -85,7 +92,7 @@ class BaseAgent(ABC, Generic[TIn, TOut]):
         self,
         event_type: StreamEventType,
         content: object = None,
-        metadata: Optional[dict] = None,
+        metadata: dict | None = None,
     ) -> StreamEvent:
         return StreamEvent(
             agent=self.name,
@@ -98,7 +105,7 @@ class BaseAgent(ABC, Generic[TIn, TOut]):
         self,
         event_type: StreamEventType,
         content: object = None,
-        metadata: Optional[dict] = None,
+        metadata: dict | None = None,
     ) -> None:
         """通过回调推送事件。"""
         if self._stream_callback is None:
@@ -107,5 +114,5 @@ class BaseAgent(ABC, Generic[TIn, TOut]):
         await self._stream_callback(evt)
 
     async def _sleep_for_demo(self, seconds: float) -> None:
-        """Mock实现中模拟耗时,真实实现应替换为真实计算。"""
+        """Small delay used only by the local fallback implementation."""
         await asyncio.sleep(seconds)

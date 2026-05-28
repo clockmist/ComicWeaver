@@ -3,11 +3,9 @@ import pytest
 
 from comicweaver.core import (
     AgentContext,
-    BaseAgent,
     CreationMode,
     InteractionMode,
     ScriptInput,
-    ScriptOutput,
 )
 
 

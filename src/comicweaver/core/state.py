@@ -7,24 +7,9 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, Optional, TypedDict
+from typing import TypedDict
 
 from pydantic import BaseModel, Field
-
-from .schema import (
-    AgentContext,
-    CharacterDB,
-    CreationMode,
-    Dialogue,
-    ExportArtifact,
-    FinalPage,
-    InteractionMode,
-    PageLayout,
-    PanelImage,
-    ReviewFeedback,
-    Scene,
-    StreamEvent,
-)
 
 
 class ComicState(TypedDict, total=False):
@@ -60,7 +45,7 @@ class ComicState(TypedDict, total=False):
     # 审查与交互
     review_results: list[dict]
     retry_counts: dict
-    pending_checkpoint: Optional[dict]
+    pending_checkpoint: dict | None
     user_decisions: list
     stream_messages: list[dict]
 

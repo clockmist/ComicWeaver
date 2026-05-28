@@ -1,13 +1,12 @@
-"""审查 Agent - Mock 实现。
-
-Layer 1 (格式校验): 真实使用 Pydantic 校验。
-Layer 2 (质量评分): Mock 用启发式规则,真实实现替换为 LLM。
-"""
+"""Review agent with schema checks, optional LLM scoring, and local rubric fallback."""
 from __future__ import annotations
 
+import asyncio
 import random
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
+from dataclasses import asdict
 
+from comicweaver.api import ApiBackendError, OpenAICompatibleLLMClient
 from comicweaver.core import (
     AgentContext,
     AgentOutputMeta,
@@ -24,9 +23,9 @@ from comicweaver.core import (
     UserOption,
 )
 from comicweaver.review import decide, get_rubric
+from comicweaver.review.rubrics_data import Rubric
 
-
-# ---- 启发式打分规则 (Mock) -------------------------------------------------
+# ---- 本地打分规则 ----------------------------------------------------------
 
 def _heuristic_script_score(out: dict) -> dict[str, float]:
     n_scenes = len(out.get("scenes", []))
@@ -102,6 +101,10 @@ _SCORERS = {
 }
 
 
+def _rubric_payload(rubric: Rubric | None) -> dict | None:
+    return asdict(rubric) if rubric is not None else None
+
+
 def _weighted_overall(rubric_id: str, scores: dict[str, float]) -> float:
     rubric = get_rubric(rubric_id)
     if rubric is None:
@@ -160,13 +163,13 @@ class ReviewerAgent(BaseAgent[ReviewInput, ReviewOutput]):
     """审查 Agent。"""
 
     name = "reviewer_agent"
-    version = "0.1.0-mock"
+    version = "0.2.0-api"
     rubric_id = "rubric_reviewer_meta"
 
     async def run(self, inputs: ReviewInput, context: AgentContext) -> ReviewOutput:
         await self._sleep_for_demo(0.15)
 
-        # Layer 1: 格式校验(Mock 简化版,只检查必填字段)
+        # Layer 1: 格式校验(轻量版,只检查必填字段)
         schema_check = self._schema_check(inputs.target_agent, inputs.target_output)
 
         if not schema_check.passed:
@@ -185,6 +188,64 @@ class ReviewerAgent(BaseAgent[ReviewInput, ReviewOutput]):
                 meta=AgentOutputMeta(agent=self.name, version=self.version),
             )
 
+        if self.config.llm.is_available:
+            try:
+                return await self._run_api(inputs, context, schema_check)
+            except ApiBackendError:
+                if not self.config.runtime.fallback_to_local:
+                    raise
+
+        return self._run_local(inputs, schema_check)
+
+    async def _run_api(
+        self,
+        inputs: ReviewInput,
+        context: AgentContext,
+        schema_check: SchemaCheckResult,
+    ) -> ReviewOutput:
+        client = OpenAICompatibleLLMClient(self.config.llm)
+        rubric = get_rubric(inputs.target_rubric_id)
+        payload = {
+            "task": "review_comicweaver_agent_output",
+            "input_schema": ReviewInput.model_json_schema(),
+            "output_schema": ReviewOutput.model_json_schema(),
+            "input": inputs.model_dump(mode="json"),
+            "context": context.model_dump(mode="json"),
+            "rubric": _rubric_payload(rubric),
+            "decision_policy": {
+                "pass_threshold": inputs.pass_threshold,
+                "escalate_threshold": inputs.escalate_threshold,
+                "max_retries": inputs.max_retries,
+            },
+            "requirements": [
+                "Return JSON only.",
+                "Scores use a 0-10 scale.",
+                "feedback.decision must be pass, revise, or escalate.",
+                "Include actionable suggestions for weak dimensions.",
+            ],
+        }
+        data = await asyncio.to_thread(
+            client.complete_json,
+            "You are the ComicWeaver quality reviewer.",
+            payload,
+        )
+        output = ReviewOutput.model_validate(data)
+        return output.model_copy(update={
+            "schema_check": schema_check,
+            "meta": AgentOutputMeta(
+                agent=self.name,
+                version=self.version,
+                inputs_hash=self._inputs_hash(inputs),
+                retry_count=context.retry_count,
+                self_check_notes=[f"LLM API provider: {self.config.llm.provider}"],
+            ),
+        })
+
+    def _run_local(
+        self,
+        inputs: ReviewInput,
+        schema_check: SchemaCheckResult,
+    ) -> ReviewOutput:
         # Layer 2: 质量评分
         scorer = _SCORERS.get(inputs.target_rubric_id)
         dim_scores = scorer(inputs.target_output) if scorer else {}
@@ -223,7 +284,7 @@ class ReviewerAgent(BaseAgent[ReviewInput, ReviewOutput]):
             ],
             issues=issues,
             suggestions=suggestions,
-            confidence=0.7,  # Mock信心
+            confidence=0.7,
         )
 
         escalation = None

@@ -22,6 +22,6 @@ class UserAbortError(AgentError):
     recoverable = False
 
 
-class EscalationRequired(AgentError):
+class EscalationRequired(AgentError):  # noqa: N818 - public API name used by docs/tests
     """审查Agent决定升级到用户。"""
     recoverable = False

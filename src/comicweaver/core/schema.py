@@ -6,11 +6,11 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import Any, Callable, Awaitable, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-
 
 # ===========================================================================
 # 枚举类型
@@ -124,14 +124,14 @@ class CharacterDraft(BaseModel):
     role: Literal["protagonist", "antagonist", "supporting", "extra"] = "supporting"
     appearance: str = ""
     personality: str = ""
-    age_hint: Optional[str] = None
+    age_hint: str | None = None
     first_appearance_scene: int = 0
 
 
 class Action(BaseModel):
     actor: str
     description: str
-    target: Optional[str] = None
+    target: str | None = None
 
 
 class Dialogue(BaseModel):
@@ -150,7 +150,7 @@ class Scene(BaseModel):
     characters_present: list[str] = Field(default_factory=list)
     actions: list[Action] = Field(default_factory=list)
     dialogues: list[Dialogue] = Field(default_factory=list)
-    narration: Optional[str] = None
+    narration: str | None = None
     emotion_intensity: float = 0.5
     panel_hint: int = 1
 
@@ -168,9 +168,9 @@ class ScriptInput(BaseModel):
     raw_text: str
     target_pages: int = 4
     target_panels_per_page: int = 4
-    style_hint: Optional[str] = None
+    style_hint: str | None = None
     language: str = "zh"
-    feedback: Optional[ReviewFeedback] = None
+    feedback: ReviewFeedback | None = None
 
 
 class ScriptOutput(BaseModel):
@@ -194,7 +194,7 @@ class ReferenceImage(BaseModel):
     image_id: str
     image_path: str
     source: Literal["generated", "uploaded", "panel"] = "generated"
-    generation_prompt: Optional[str] = None
+    generation_prompt: str | None = None
     confidence: float = 0.8
     created_at: float = Field(default_factory=time.time)
 
@@ -240,7 +240,7 @@ class WeightedReference(BaseModel):
     image_path: str
     weight: float
     role: str = "base"
-    embedding_id: Optional[str] = None
+    embedding_id: str | None = None
 
 
 class ReferenceWindow(BaseModel):
@@ -252,16 +252,16 @@ class ReferenceWindow(BaseModel):
 
 class CharacterInput(BaseModel):
     operation: Literal["init", "build_reference_window", "update_archive"] = "init"
-    character_drafts: Optional[list[CharacterDraft]] = None
-    style_preset: Optional[str] = None
-    panel_id: Optional[str] = None
-    target_characters: Optional[list[str]] = None
-    feedback: Optional[ReviewFeedback] = None
+    character_drafts: list[CharacterDraft] | None = None
+    style_preset: str | None = None
+    panel_id: str | None = None
+    target_characters: list[str] | None = None
+    feedback: ReviewFeedback | None = None
 
 
 class CharacterOutput(BaseModel):
     operation: str
-    character_db: Optional[CharacterDB] = None
+    character_db: CharacterDB | None = None
     reference_windows: dict[str, ReferenceWindow] = Field(default_factory=dict)
     archive_updated: bool = False
     meta: AgentOutputMeta = Field(default_factory=lambda: AgentOutputMeta(
@@ -279,7 +279,7 @@ class PromptPack(BaseModel):
     style_tags: list[str] = Field(default_factory=list)
     composition_tags: list[str] = Field(default_factory=list)
     quality_tags: list[str] = Field(default_factory=list)
-    seed_hint: Optional[int] = None
+    seed_hint: int | None = None
 
 
 class BubbleHint(BaseModel):
@@ -324,11 +324,11 @@ class PageLayout(BaseModel):
 class StoryboardInput(BaseModel):
     scenes: list[Scene]
     emotion_curve: list[float]
-    character_db: Optional[CharacterDB] = None
+    character_db: CharacterDB | None = None
     style_preset: str = "manga"
     target_pages: int = 4
     target_panels_per_page: int = 4
-    feedback: Optional[ReviewFeedback] = None
+    feedback: ReviewFeedback | None = None
 
 
 class StoryboardOutput(BaseModel):
@@ -349,12 +349,12 @@ class PanelImage(BaseModel):
     image_format: Literal["png", "webp"] = "png"
     width: int = 768
     height: int = 1024
-    backend: str = "mock"
+    backend: str = "placeholder"
     model_version: str = "0.0"
     seed: int = 0
     steps: int = 0
     cfg_scale: float = 0.0
-    sampler: str = "mock"
+    sampler: str = "api"
     generation_time_ms: int = 0
     characters_present: list[str] = Field(default_factory=list)
     prompt_used: str = ""
@@ -376,15 +376,15 @@ class ImageInput(BaseModel):
     style_preset: str = "manga"
     backend_preference: str = "auto"
     quality_target: Literal["draft", "standard", "high"] = "standard"
-    seed: Optional[int] = None
+    seed: int | None = None
     width: int = 768
     height: int = 1024
-    feedback: Optional[ReviewFeedback] = None
+    feedback: ReviewFeedback | None = None
 
 
 class ImageOutput(BaseModel):
     panel_image: PanelImage
-    backend_used: str = "mock"
+    backend_used: str = "placeholder"
     fallback_chain: list[str] = Field(default_factory=list)
     self_check: SelfCheckResult = Field(default_factory=SelfCheckResult)
     meta: AgentOutputMeta = Field(default_factory=lambda: AgentOutputMeta(
@@ -439,7 +439,7 @@ class LayoutInput(BaseModel):
     style_preset: str = "manga"
     font_config: FontConfig = Field(default_factory=FontConfig)
     export_formats: list[str] = Field(default_factory=lambda: ["png"])
-    feedback: Optional[ReviewFeedback] = None
+    feedback: ReviewFeedback | None = None
 
 
 class LayoutMetrics(BaseModel):
@@ -508,7 +508,7 @@ class ReviewOutput(BaseModel):
     feedback: ReviewFeedback
     schema_check: SchemaCheckResult = Field(default_factory=SchemaCheckResult)
     quality_check: QualityCheckResult = Field(default_factory=QualityCheckResult)
-    escalation_summary: Optional[EscalationSummary] = None
+    escalation_summary: EscalationSummary | None = None
     meta: AgentOutputMeta = Field(default_factory=lambda: AgentOutputMeta(
         agent="reviewer_agent", version="0.1.0"
     ))

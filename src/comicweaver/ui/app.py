@@ -9,8 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from pathlib import Path
-from typing import Any, Iterator
+from collections.abc import Iterator
 
 import gradio as gr
 
@@ -29,7 +28,6 @@ from .html_widgets import (
     render_storyboard_preview,
 )
 from .styles import CUSTOM_CSS
-
 
 # ============================================================================
 # 应用会话状态(单进程单用户简化方案)
@@ -362,7 +360,7 @@ def build_ui() -> gr.Blocks:
         <div class="cw-header">
             <h1>🎨 ComicWeaver</h1>
             <div class="subtitle">
-                多Agent协作的自动化漫画创作系统 · v0.1.0 初始框架 (Mock实现)
+                多Agent协作的自动化漫画创作系统 · v0.2.0 API-ready
             </div>
         </div>
         """)
@@ -536,8 +534,8 @@ def build_ui() -> gr.Blocks:
                 gr.Markdown("""
                 ## ComicWeaver v0.1.0 - 初始框架
 
-                **当前状态:** Mock 实现,所有 Agent 使用确定性虚假数据,
-                不调用真实 LLM 与图像生成模型。运行无需 GPU。
+                **当前状态:** 默认使用本地 fallback,可通过配置接入 LLM API 与 ComfyUI。
+                未配置真实后端时运行无需 GPU。
 
                 ### 系统组成
                 - **5 个生产 Agent:** 剧本 / 角色 / 分镜 / 图像 / 排版

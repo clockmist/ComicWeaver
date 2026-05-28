@@ -1,4 +1,4 @@
-"""占位图生成工具 - 用于Mock阶段提供可视的"假图像"。
+"""占位图生成工具 - 用于本地 fallback 提供可视的占位图。
 
 真实实现替换为 ImageAgent + diffusion 模型生成。
 """
@@ -6,12 +6,10 @@ from __future__ import annotations
 
 import hashlib
 import os
-from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
 from .paths import project_dir
-
 
 _DEFAULT_FONT_SIZE = 28
 _PALETTE = [
@@ -73,7 +71,7 @@ def generate_character_placeholder(
     draw.text((20, 20), f"角色: {name}", fill=(40, 40, 40), font=font)
     small = _safe_font(18)
     _wrap_draw(draw, f"外观: {appearance}", (20, 60), size[0] - 40, small)
-    _wrap_draw(draw, f"[Mock 占位图 · {char_id}]", (20, size[1] - 40), size[0] - 40, small)
+    _wrap_draw(draw, f"[Local 占位图 · {char_id}]", (20, size[1] - 40), size[0] - 40, small)
 
     img.save(path)
     return str(path)
@@ -123,7 +121,7 @@ def generate_panel_placeholder(
 
     small = _safe_font(16)
     _wrap_draw(draw, prompt[:120], (20, 60), size[0] - 40, small)
-    draw.text((20, size[1] - 30), "[Mock 漫画分镜]",
+    draw.text((20, size[1] - 30), "[Local 漫画分镜]",
               fill=(80, 80, 80), font=small)
 
     img.save(path)

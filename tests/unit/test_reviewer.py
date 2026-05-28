@@ -2,8 +2,9 @@
 import pytest
 
 from comicweaver.agents import ReviewerAgent
+from comicweaver.agents.reviewer_agent import _rubric_payload
 from comicweaver.core import AgentContext, CreationMode, InteractionMode, ReviewInput
-from comicweaver.review import SCRIPT_RUBRIC, decide, get_rubric
+from comicweaver.review import decide, get_rubric
 
 
 def test_rubric_registry():
@@ -12,6 +13,15 @@ def test_rubric_registry():
     assert rubric is not None
     assert rubric.target_agent == "script_agent"
     assert len(rubric.dimensions) > 0
+
+
+def test_rubric_payload_serializes_dataclass():
+    """API reviewer payload can serialize dataclass rubrics."""
+    payload = _rubric_payload(get_rubric("rubric_script_v1"))
+
+    assert payload is not None
+    assert payload["rubric_id"] == "rubric_script_v1"
+    assert payload["dimensions"][0]["dim_id"] == "completeness"
 
 
 def test_decision_logic():
@@ -30,7 +40,7 @@ def test_decision_logic():
 
 @pytest.mark.asyncio
 async def test_reviewer_agent():
-    """测试审查 Agent 的 Mock 实现。"""
+    """测试审查 Agent 的默认本地评分。"""
     agent = ReviewerAgent()
     ctx = AgentContext(
         project_id="test",

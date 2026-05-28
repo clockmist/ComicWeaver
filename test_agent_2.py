@@ -29,7 +29,7 @@ if sys.platform == 'win32':
 # 配置
 # ============================================================================
 
-ZHIPUAI_API_KEY = "your_api_key_here"
+ZHIPUAI_API_KEY = os.getenv("ZHIPUAI_API_KEY", "")
 COMFYUI_SERVER = "127.0.0.1:8188"
 
 OUTPUT_DIR     = os.path.join(os.path.dirname(__file__), "output")

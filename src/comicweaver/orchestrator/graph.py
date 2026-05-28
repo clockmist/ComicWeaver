@@ -6,8 +6,7 @@
 from __future__ import annotations
 
 import asyncio
-import threading
-from typing import AsyncIterator, Optional
+from collections.abc import AsyncIterator
 
 from comicweaver.agents import (
     CharacterAgent,
@@ -19,30 +18,22 @@ from comicweaver.agents import (
 )
 from comicweaver.core import (
     AgentContext,
-    BaseAgent,
     CharacterDB,
     CharacterDraft,
     CharacterInput,
-    CharacterOutput,
-    CharacterProfile,
     ComicState,
     CreationMode,
     ImageInput,
-    ImageOutput,
     InteractionMode,
     LayoutInput,
     PageLayout,
     PanelImage,
-    ReferenceImage,
     ReviewDecision,
     ReviewFeedback,
     ReviewInput,
     Scene,
     ScriptInput,
-    ScriptOutput,
     StoryboardInput,
-    StoryboardOutput,
-    StreamEvent,
     StreamEventType,
 )
 
@@ -70,8 +61,8 @@ class ComicWorkflow:
         self.reviewer = ReviewerAgent()
 
         # thread-safe 响应通道(由Gradio线程调用 respond,工作流线程消费)
-        self._response_queue: Optional[asyncio.Queue] = None
-        self._loop_for_response: Optional[asyncio.AbstractEventLoop] = None
+        self._response_queue: asyncio.Queue | None = None
+        self._loop_for_response: asyncio.AbstractEventLoop | None = None
 
     def _ensure_queue(self) -> asyncio.Queue:
         if self._response_queue is None:

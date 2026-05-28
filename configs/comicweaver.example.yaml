@@ -1,0 +1,30 @@
+llm:
+  # Any OpenAI-compatible /chat/completions endpoint.
+  provider: openai_compatible
+  base_url: "https://api.example.com/v1"
+  api_key: ""
+  model: "your-json-capable-model"
+  enabled: false
+  temperature: 0.3
+  max_tokens: 4096
+  timeout_seconds: 60
+
+image:
+  # Supported built-in provider: comfyui. Keep disabled to use local placeholders.
+  provider: comfyui
+  server_url: "http://127.0.0.1:8188"
+  model: "your-checkpoint.safetensors"
+  enabled: false
+  timeout_seconds: 180
+  workflow_character_path: "generate_character.json"
+  workflow_panel_path: "generate_picture.json"
+  fallback_to_placeholder: true
+
+storage:
+  projects_dir: "projects"
+  cache_dir: "cache"
+  outputs_dir: "outputs"
+
+runtime:
+  fallback_to_local: true
+  request_retries: 1

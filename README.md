@@ -6,9 +6,10 @@ ComicWeaver 是一个 Agent + 图形学的实验性系统,从一句话主题或�
 
 ## 当前状态
 
-**v0.1.0 - 初始框架**
+**v0.2.0 - API-ready 框架**
 
-本版本提供完整的可扩展骨架与可演示前端,但 Agent 内部使用 Mock 实现,不调用真实的 LLM 与图像生成模型。运行不需要 GPU。
+本版本提供完整的可扩展骨架与可演示前端。Agent 会优先使用配置的 LLM / 图像 API,
+未配置时自动退回本地规则与占位图后端,因此默认运行不需要 GPU。
 
 ## 安装
 
@@ -19,6 +20,29 @@ python -m venv .venv
 # source .venv/bin/activate  # Linux/Mac
 
 pip install -e .
+```
+
+## 配置
+
+默认不需要配置即可运行。需要接入真实后端时,复制示例配置:
+
+```bash
+mkdir -p configs
+cp configs/comicweaver.example.yaml configs/comicweaver.yaml
+```
+
+也可以通过环境变量覆盖:
+
+```bash
+export COMICWEAVER_LLM_ENABLED=true
+export COMICWEAVER_LLM_PROVIDER=openai_compatible
+export COMICWEAVER_LLM_BASE_URL=https://api.example.com/v1
+export COMICWEAVER_LLM_API_KEY=your_key
+export COMICWEAVER_LLM_MODEL=your_json_model
+
+export COMICWEAVER_IMAGE_ENABLED=true
+export COMICWEAVER_IMAGE_PROVIDER=comfyui
+export COMICWEAVER_IMAGE_SERVER_URL=http://127.0.0.1:8188
 ```
 
 ## 启动
@@ -55,7 +79,7 @@ ComicWeaver/
 
 ## 扩展点
 
-每个 Agent 通过 `BaseAgent` 接口扩展。要替换 Mock 实现:
+每个 Agent 通过 `BaseAgent` 接口扩展。要替换或新增 API 后端:
 
 1. 继承 `BaseAgent[TIn, TOut]`
 2. 实现 `run()` 与 `astream()`

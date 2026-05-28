@@ -4,7 +4,6 @@ from __future__ import annotations
 import html
 import time
 
-
 _PHASE_AGENTS = [
     ("script_agent", "📝 剧本"),
     ("character_agent", "👤 角色"),
@@ -166,7 +165,7 @@ def render_emotion_curve(curve: list[float]) -> str:
 
     xs = [i * w / (n - 1) for i in range(n)]
     ys = [h - 10 - v * (h - 20) for v in curve]
-    pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
+    pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys, strict=False))
 
     # 高潮点标记
     markers = []

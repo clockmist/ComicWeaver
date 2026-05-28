@@ -33,7 +33,7 @@ from typing import TypedDict
 # 配置常量
 # ============================================================================
 
-ZHIPUAI_API_KEY = "2487ed1dfc9f456fbd5630be90a18575.kPSrC0ZoSbjHBwgL"
+ZHIPUAI_API_KEY = os.getenv("ZHIPUAI_API_KEY", "")
 COMFYUI_SERVER = "127.0.0.1:8188"
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")

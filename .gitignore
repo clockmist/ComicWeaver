@@ -22,6 +22,7 @@ venv/
 .venv/
 env/
 .env
+.env.*
 ENV/
 
 # IDE
@@ -61,5 +62,15 @@ gradio_cached_examples/
 .codeartsdoer/
 output/
 workflow_api.json
+.codex/
+.agents/
+*.cache
 
-
+configs/comicweaver.yaml
+configs/*.local.yaml
+!configs/comicweaver.example.yaml
+external/ComfyUI/models/
+external/ComfyUI/input/
+external/ComfyUI/output/
+external/ComfyUI/temp/
+external/ComfyUI/.venv/

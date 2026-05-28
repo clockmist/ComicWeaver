@@ -1,10 +1,8 @@
 """轻量级项目持久化 - JSON文件,真实版本可换 SQLite。"""
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
-from typing import Optional
 
 from comicweaver.core import ComicProject, ComicState
 
@@ -22,7 +20,7 @@ def save_project(project: ComicProject) -> Path:
     return path
 
 
-def load_project(project_id: str) -> Optional[ComicProject]:
+def load_project(project_id: str) -> ComicProject | None:
     path = project_dir(project_id) / "project.json"
     if not path.exists():
         return None

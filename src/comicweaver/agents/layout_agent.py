@@ -1,8 +1,8 @@
-"""排版合成 Agent - Mock 实现。"""
+"""Page layout and composition agent."""
 from __future__ import annotations
 
 import os
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from comicweaver.core import (
     AgentContext,
@@ -22,10 +22,10 @@ from comicweaver.storage.placeholder import generate_page_placeholder
 
 
 class LayoutAgent(BaseAgent[LayoutInput, LayoutOutput]):
-    """排版合成 Agent (Mock)."""
+    """Page layout and composition agent."""
 
     name = "layout_agent"
-    version = "0.1.0-mock"
+    version = "0.2.0-local"
     rubric_id = "rubric_layout_v1"
 
     async def run(self, inputs: LayoutInput, context: AgentContext) -> LayoutOutput:
@@ -78,7 +78,6 @@ class LayoutAgent(BaseAgent[LayoutInput, LayoutOutput]):
                 dialogues=dialogues,
             )
 
-            file_size = os.path.getsize(page_path) if os.path.exists(page_path) else 0
             final_pages.append(
                 FinalPage(
                     page_id=page.page_id,

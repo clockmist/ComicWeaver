@@ -1,8 +1,10 @@
-"""分镜设计 Agent - Mock 实现。"""
+"""Storyboard planning agent with API and local backends."""
 from __future__ import annotations
 
-from typing import AsyncIterator
+import asyncio
+from collections.abc import AsyncIterator
 
+from comicweaver.api import ApiBackendError, OpenAICompatibleLLMClient
 from comicweaver.core import (
     AgentContext,
     AgentOutputMeta,
@@ -21,7 +23,6 @@ from comicweaver.core import (
     StreamEvent,
     StreamEventType,
 )
-
 
 # 简单布局模板:每页固定bbox列表(x, y, w, h),坐标0-1
 _LAYOUT_TEMPLATES = {
@@ -107,13 +108,58 @@ def _build_prompt(scene: Scene, shot: ShotSize, angle: CameraAngle, style: str) 
 
 
 class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
-    """分镜设计 Agent (Mock)."""
+    """Storyboard planning agent."""
 
     name = "storyboard_agent"
-    version = "0.1.0-mock"
+    version = "0.2.0-api"
     rubric_id = "rubric_storyboard_v1"
 
     async def run(
+        self, inputs: StoryboardInput, context: AgentContext
+    ) -> StoryboardOutput:
+        if self.config.llm.is_available:
+            try:
+                return await self._run_api(inputs, context)
+            except ApiBackendError:
+                if not self.config.runtime.fallback_to_local:
+                    raise
+        return await self._run_local(inputs, context)
+
+    async def _run_api(
+        self, inputs: StoryboardInput, context: AgentContext
+    ) -> StoryboardOutput:
+        client = OpenAICompatibleLLMClient(self.config.llm)
+        payload = {
+            "task": "generate_comic_storyboard",
+            "input_schema": StoryboardInput.model_json_schema(),
+            "output_schema": StoryboardOutput.model_json_schema(),
+            "input": inputs.model_dump(mode="json"),
+            "context": context.model_dump(mode="json"),
+            "layout_coordinate_system": "Panel bbox values use normalized x/y/width/height in [0, 1].",
+            "requirements": [
+                "Return JSON only.",
+                "Each page must contain panels with valid bbox values.",
+                "Each panel must include prompt_pack for image generation.",
+                "Preserve scene and character ids from the input.",
+            ],
+        }
+        data = await asyncio.to_thread(
+            client.complete_json,
+            "You convert comic scripts into page-level storyboards.",
+            payload,
+        )
+        output = StoryboardOutput.model_validate(data)
+        return output.model_copy(update={
+            "meta": AgentOutputMeta(
+                agent=self.name,
+                version=self.version,
+                inputs_hash=self._inputs_hash(inputs),
+                retry_count=context.retry_count,
+                self_check_notes=[f"LLM API provider: {self.config.llm.provider}"],
+            )
+        })
+
+    async def _run_local(
         self, inputs: StoryboardInput, context: AgentContext
     ) -> StoryboardOutput:
         await self._sleep_for_demo(0.3)
