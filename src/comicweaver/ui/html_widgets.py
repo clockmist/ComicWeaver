@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import html
+import json
+import os
 import time
+from typing import Any
 
 _PHASE_AGENTS = [
     ("script_agent", "📝 剧本"),
@@ -283,3 +286,561 @@ def render_review_history(reviews: list[dict]) -> str:
         </table>
     </div>
     """
+
+
+# ============================================================================
+# 增强：Agent 输出面板
+# ============================================================================
+
+
+def _dict_preview(d: dict, max_depth: int = 2, current_depth: int = 0) -> str:
+    """递归渲染字典为缩进 HTML，键带颜色、值截断。"""
+    if current_depth >= max_depth or not isinstance(d, dict):
+        if isinstance(d, str) and len(d) > 200:
+            return html.escape(d[:200] + "...")
+        return html.escape(str(d)[:200])
+    lines = []
+    for k, v in d.items():
+        if isinstance(v, dict):
+            lines.append(
+                f'<div style="margin-left:{current_depth*16}px;">'
+                f'<b style="color:#1e40af;">{html.escape(str(k))}:</b> '
+                f'<span style="color:#64748b;">{{... {len(v)} keys}}</span>'
+                f'{_dict_preview(v, max_depth, current_depth + 1)}'
+                f'</div>'
+            )
+        elif isinstance(v, list):
+            if len(v) == 0:
+                lines.append(f'<b style="color:#1e40af;">{html.escape(str(k))}:</b> []')
+            elif isinstance(v[0], dict):
+                items = "".join(
+                    f'<details style="margin-left:8px;"><summary style="cursor:pointer;color:#3b82f6;">'
+                    f'[{i}]</summary>{_dict_preview(item, max_depth, current_depth + 1)}</details>'
+                    for i, item in enumerate(v[:15])
+                )
+                more = f' ... +{len(v) - 15} more' if len(v) > 15 else ""
+                lines.append(
+                    f'<div style="margin-left:{current_depth*16}px;">'
+                    f'<b style="color:#1e40af;">{html.escape(str(k))}:</b> [{len(v)} items]{more}'
+                    f'{items}</div>'
+                )
+            else:
+                preview = ", ".join(html.escape(str(x)) for x in v[:10])
+                more = f" ... +{len(v) - 10}" if len(v) > 10 else ""
+                lines.append(
+                    f'<div style="margin-left:{current_depth*16}px;">'
+                    f'<b style="color:#1e40af;">{html.escape(str(k))}:</b> '
+                    f'[{preview}{more}]</div>'
+                )
+        elif isinstance(v, str):
+            display = v[:100] + "..." if len(v) > 100 else v
+            lines.append(
+                f'<div style="margin-left:{current_depth*16}px;">'
+                f'<b style="color:#1e40af;">{html.escape(str(k))}:</b> '
+                f'<span style="color:#334155;">{html.escape(display)}</span></div>'
+            )
+        else:
+            lines.append(
+                f'<div style="margin-left:{current_depth*16}px;">'
+                f'<b style="color:#1e40af;">{html.escape(str(k))}:</b> '
+                f'<span style="color:#0f172a;">{html.escape(str(v))}</span></div>'
+            )
+    return "\n".join(lines)
+
+
+def render_agent_outputs(agent_outputs: dict[str, dict]) -> str:
+    """渲染所有 Agent 的输出面板（可折叠卡片）。"""
+    if not agent_outputs:
+        return '<div style="color:#64748b;padding:12px;">工作流尚未运行，无 Agent 输出数据。<br>请在「创作流程」Tab 启动工作流后再查看。</div>'
+
+    agents_order = [
+        ("script_agent", "📝 剧本 Agent", "剧本理解"),
+        ("character_agent", "👤 角色 Agent", "角色管理"),
+        ("storyboard_agent", "🎬 分镜 Agent", "分镜设计"),
+        ("image_agent", "🎨 图像 Agent", "面板图像生成"),
+        ("layout_agent", "📐 排版 Agent", "页面排版合成"),
+        ("reviewer_agent", "✅ 审查 Agent", "质量审查"),
+    ]
+
+    cards = []
+    for agent_id, label, subtitle in agents_order:
+        outputs = agent_outputs.get(agent_id, [])
+        card_content = ""
+        if not outputs:
+            card_content = '<div style="color:#94a3b8;font-size:13px;padding:8px;">暂无输出数据</div>'
+        else:
+            for i, out in enumerate(outputs):
+                out_id = out.get("panel_id") or out.get("title") or f"#{i + 1}"
+                output_data = out.get("output", {})
+                card_content += (
+                    f'<details style="margin-bottom:4px;" open>'
+                    f'<summary style="cursor:pointer;font-size:13px;font-weight:600;'
+                    f'color:#1e293b;padding:6px 0;">'
+                    f'{html.escape(str(out_id))}</summary>'
+                    f'<div style="font-size:12px;font-family:monospace;background:#f8fafc;'
+                    f'padding:8px 12px;border-radius:6px;max-height:400px;overflow-y:auto;">'
+                    f'{_dict_preview(output_data, max_depth=3)}'
+                    f'</div></details>'
+                )
+
+        cards.append(f"""
+        <div class="cw-agent-output-card">
+            <div class="cw-agent-output-header">
+                <span style="font-size:18px;">{label}</span>
+                <span style="font-size:12px;color:#64748b;">{subtitle}</span>
+            </div>
+            <div style="padding:8px 12px;">{card_content}</div>
+        </div>
+        """)
+
+    return f'<div style="display:flex;flex-direction:column;gap:12px;">{"".join(cards)}</div>'
+
+
+def render_dev_log(dev_entries: list[dict], filter_category: str = "all",
+                   filter_level: str = "all", max_entries: int = 100) -> str:
+    """渲染开发者日志查看器（带筛选）。"""
+    if not dev_entries:
+        return '<div style="color:#64748b;padding:12px;">暂无开发者日志。<br>请在「创作流程」Tab 启动工作流后自动生成。</div>'
+
+    # 筛选
+    filtered = []
+    for e in dev_entries:
+        if filter_category != "all" and e.get("category", "") != filter_category:
+            continue
+        if filter_level != "all" and e.get("level", "") != filter_level:
+            continue
+        filtered.append(e)
+
+    entries_to_show = filtered[-max_entries:]
+    if not entries_to_show:
+        return '<div style="color:#64748b;padding:12px;">当前筛选条件下无匹配日志。</div>'
+
+    # 分类映射颜色
+    cat_colors: dict[str, str] = {
+        "agent_input": "#3b82f6",
+        "agent_output": "#10b981",
+        "state_change": "#8b5cf6",
+        "review_decision": "#f59e0b",
+        "error": "#ef4444",
+        "performance": "#06b6d4",
+        "checkpoint": "#f97316",
+        "workflow": "#64748b",
+    }
+    level_icons: dict[str, str] = {
+        "trace": "·",
+        "debug": "🔍",
+        "info": "ℹ️",
+        "warn": "⚠️",
+        "error": "❌",
+        "perf": "⏱",
+    }
+
+    lines = []
+    for e in entries_to_show:
+        ts = time.strftime("%H:%M:%S", time.localtime(e.get("timestamp", time.time())))
+        cat = e.get("category", "?")
+        lvl = e.get("level", "info")
+        agent = e.get("agent", "?")
+        msg = html.escape(str(e.get("message", ""))[:200])
+        dur = e.get("duration_ms", 0)
+        dur_str = f" [{dur:.0f}ms]" if dur > 0 else ""
+        color = cat_colors.get(cat, "#94a3b8")
+        icon = level_icons.get(lvl, "·")
+
+        # 可点击展开详细数据
+        data_dict = e.get("data", {})
+        data_json = json.dumps(data_dict, ensure_ascii=False, default=str) if data_dict else ""
+        data_preview = ""
+        if data_json:
+            data_preview = (
+                f'<details style="margin-left:16px;font-size:11px;">'
+                f'<summary style="cursor:pointer;color:{color};">展开数据</summary>'
+                f'<pre style="background:#0f172a;color:#e2e8f0;padding:8px;border-radius:4px;'
+                f'max-height:200px;overflow:auto;font-size:11px;">'
+                f'{html.escape(data_json[:2000])}'
+                f'</pre></details>'
+            )
+
+        lines.append(
+            f'<div style="padding:3px 0;border-bottom:1px solid #f1f5f9;font-size:12px;">'
+            f'<span style="color:#94a3b8;">{ts}</span> '
+            f'<span style="color:{color};font-weight:600;">{icon} [{cat}]</span> '
+            f'<span style="color:#1e293b;">[{html.escape(agent)}]</span> '
+            f'{msg}{dur_str}'
+            f'{data_preview}'
+            f'</div>'
+        )
+
+    stats = (
+        f'<div style="font-size:12px;color:#64748b;margin-bottom:8px;">'
+        f'显示 {len(entries_to_show)}/{len(dev_entries)} 条日志'
+        f'</div>'
+    )
+    body = "\n".join(lines)
+    return f'<div class="cw-dev-log">{stats}<div style="max-height:500px;overflow-y:auto;">{body}</div></div>'
+
+
+def render_performance_summary(dev_entries: list[dict]) -> str:
+    """渲染性能统计表格。"""
+    perf_entries = [
+        e for e in dev_entries
+        if e.get("category") == "performance"
+    ]
+    if not perf_entries:
+        return '<div style="color:#64748b;font-size:13px;padding:12px;">暂无性能数据（需运行工作流后生成）</div>'
+
+    rows = []
+    total_ms = 0.0
+    for e in perf_entries:
+        agent = e.get("agent", "?")
+        dur = e.get("duration_ms", 0)
+        total_ms += dur
+        dur_str = f"{dur:.0f}ms" if dur < 1000 else f"{dur / 1000:.1f}s"
+        data = e.get("data", {})
+        retries = data.get("retry_count", 0)
+        status = data.get("status", "ok")
+        status_icon = {"ok": "✅", "partial": "⚠️"}.get(status, "✅")
+
+        rows.append(f"""
+        <tr>
+            <td style="padding:6px 12px;text-align:center;">{status_icon}</td>
+            <td style="padding:6px 12px;font-weight:500;">{html.escape(agent)}</td>
+            <td style="padding:6px 12px;text-align:right;font-family:monospace;">{dur_str}</td>
+            <td style="padding:6px 12px;text-align:center;">{retries}</td>
+        </tr>
+        """)
+
+    total_str = f"{total_ms:.0f}ms" if total_ms < 1000 else f"{total_ms / 1000:.1f}s"
+    return f"""
+    <div class="cw-card">
+        <h3 style="margin:0 0 12px 0;color:#1e293b;">⏱ 性能统计</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead>
+                <tr style="background:#f8fafc;color:#475569;">
+                    <th style="padding:8px 12px;text-align:center;">状态</th>
+                    <th style="padding:8px 12px;text-align:left;">Agent</th>
+                    <th style="padding:8px 12px;text-align:right;">耗时</th>
+                    <th style="padding:8px 12px;text-align:center;">重试</th>
+                </tr>
+            </thead>
+            <tbody>{''.join(rows)}</tbody>
+            <tfoot>
+                <tr style="font-weight:700;border-top:2px solid #e2e8f0;">
+                    <td colspan="2" style="padding:8px 12px;text-align:right;">总计</td>
+                    <td style="padding:8px 12px;text-align:right;font-family:monospace;">{total_str}</td>
+                    <td></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+    """
+
+
+def render_character_profiles(character_db: dict | None,
+                               agent_outputs: dict[str, list[dict]] | None = None) -> str:
+    """渲染角色档案卡片（含参考图）。"""
+    if not character_db:
+        return '<div style="color:#64748b;padding:12px;">角色数据尚未生成。<br>请在「创作流程」Tab 运行工作流后查看。</div>'
+
+    characters = character_db.get("characters", {})
+    if not characters:
+        return '<div style="color:#64748b;padding:12px;">角色列表为空</div>'
+
+    cards = []
+    for char_id, profile in characters.items():
+        name = html.escape(profile.get("name", char_id))
+        traits = profile.get("visual_traits", {})
+        ref = profile.get("base_reference", {})
+
+        # 视觉特征
+        trait_items = []
+        for tk, tv in traits.items():
+            if tv:
+                trait_items.append(f'<span class="cw-badge" style="margin:2px;">{html.escape(tk)}: {html.escape(str(tv))}</span>')
+
+        # 参考图
+        img_path = ref.get("image_path", "")
+        img_html = ""
+        if img_path and os.path.exists(img_path):
+            img_html = (
+                f'<div style="text-align:center;margin:8px 0;">'
+                f'<img src="/gradio_api/file={html.escape(img_path)}" '
+                f'style="max-width:150px;max-height:200px;border:1px solid #e2e8f0;'
+                f'border-radius:8px;" alt="{name} 参考图"/>'
+                f'</div>'
+            )
+
+        # 元数据
+        meta_info = (
+            f'<div style="font-size:11px;color:#94a3b8;">'
+            f'来源: {ref.get("source", "?")} · '
+            f'置信度: {ref.get("confidence", 0):.2f} · '
+            f'锁定: {"是" if profile.get("locked") else "否"}'
+            f'</div>'
+        )
+
+        cards.append(f"""
+        <div class="cw-character-card" style="display:inline-block;width:220px;
+                    margin:6px;vertical-align:top;padding:12px;">
+            <h4 style="margin:0 0 4px 0;color:#1e293b;">{name}</h4>
+            <div style="font-size:11px;color:#64748b;margin-bottom:8px;">ID: {html.escape(char_id)}</div>
+            {img_html}
+            <div style="margin:6px 0;">{''.join(trait_items)}</div>
+            {meta_info}
+        </div>
+        """)
+
+    return f"""
+    <div class="cw-card">
+        <h3 style="margin:0 0 12px 0;color:#1e293b;">👤 角色档案 ({len(characters)})</h3>
+        <div style="display:flex;flex-wrap:wrap;">{''.join(cards)}</div>
+    </div>
+    """
+
+
+def render_panel_images_gallery(panel_images: list[dict]) -> str:
+    """渲染单张面板图像画廊（非最终合成页）。"""
+    if not panel_images:
+        return '<div style="color:#64748b;padding:12px;">面板图像尚未生成。<br>请在「创作流程」Tab 运行工作流后查看。</div>'
+
+    items = []
+    for pi in panel_images:
+        pid = pi.get("panel_id", "?")
+        path = pi.get("image_path", "")
+        backend = pi.get("backend", "?")
+        gen_time = pi.get("generation_time_ms", 0)
+        prompt = pi.get("prompt_used", "")[:80] or ""
+
+        img_html = ""
+        if path and os.path.exists(path):
+            img_html = (
+                f'<img src="/gradio_api/file={html.escape(path)}" '
+                f'style="width:100%;height:180px;object-fit:cover;border-radius:6px;" '
+                f'alt="{html.escape(pid)}" loading="lazy"/>'
+            )
+        else:
+            img_html = (
+                f'<div style="width:100%;height:180px;background:#f1f5f9;border-radius:6px;'
+                f'display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:12px;">'
+                f'无图像</div>'
+            )
+
+        items.append(f"""
+        <div style="display:inline-block;width:200px;margin:6px;vertical-align:top;
+                    background:white;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+            {img_html}
+            <div style="padding:8px;">
+                <div style="font-size:12px;font-weight:600;color:#1e293b;"
+                     title="{html.escape(pid)}">{html.escape(pid)}</div>
+                <div style="font-size:11px;color:#64748b;">后端: {html.escape(backend)} · {gen_time}ms</div>
+                <div style="font-size:10px;color:#94a3b8;margin-top:2px;overflow:hidden;
+                            text-overflow:ellipsis;white-space:nowrap;"
+                     title="{html.escape(prompt)}">{html.escape(prompt)}</div>
+            </div>
+        </div>
+        """)
+
+    return f"""
+    <div class="cw-card">
+        <h3 style="margin:0 0 12px 0;color:#1e293b;">🎨 面板图像 ({len(panel_images)})</h3>
+        <div style="white-space:nowrap;overflow-x:auto;padding:4px;">{''.join(items)}</div>
+    </div>
+    """
+
+
+def render_storyboard_detail(plan: list[dict]) -> str:
+    """渲染分镜详细规划（每面板包含 shot/angle/action/prompt）。"""
+    if not plan:
+        return '<div style="color:#64748b;padding:12px;">分镜数据尚未生成。<br>请在「创作流程」Tab 运行工作流后查看。</div>'
+
+    panels_html = []
+    for page in plan:
+        page_num = page.get("page_number", "?")
+        template = page.get("layout_template", "?")
+        is_climax = page.get("is_climax_page", False)
+        panels = page.get("panels", [])
+
+        panel_rows = []
+        for pn in panels:
+            prompt_pack = pn.get("prompt_pack", {})
+            chars = ", ".join(pn.get("characters_in_panel", [])) or "无"
+            bubbles = pn.get("speech_bubble_hints", [])
+            bubble_texts = "; ".join(
+                f'{b.get("dialogue_index", "?")}:{b.get("bubble_type", "speech")}'
+                for b in bubbles[:3]
+            ) or "无对话"
+
+            panel_rows.append(f"""
+            <tr>
+                <td style="padding:4px 8px;font-size:12px;font-family:monospace;">
+                    {html.escape(pn.get('panel_id', '?'))}</td>
+                <td style="padding:4px 8px;font-size:12px;">
+                    {pn.get('order_in_page', '?')}</td>
+                <td style="padding:4px 8px;font-size:12px;">
+                    <span class="cw-badge">{html.escape(pn.get('shot_size', '?'))}</span></td>
+                <td style="padding:4px 8px;font-size:12px;">
+                    {html.escape(pn.get('camera_angle', '?'))}</td>
+                <td style="padding:4px 8px;font-size:12px;max-width:140px;
+                           overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                    title="{html.escape(pn.get('primary_action', ''))}">
+                    {html.escape((pn.get('primary_action', '') or '')[:40])}</td>
+                <td style="padding:4px 8px;font-size:12px;">
+                    {pn.get('emotion_intensity', 0):.2f}</td>
+                <td style="padding:4px 8px;font-size:11px;color:#64748b;">{html.escape(chars)}</td>
+                <td style="padding:4px 8px;font-size:11px;max-width:200px;
+                           overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                    title="{html.escape(prompt_pack.get('positive_prompt', ''))}">
+                    {html.escape((prompt_pack.get('positive_prompt', '') or '')[:60])}</td>
+            </tr>
+            """)
+
+        climax_badge = (
+            '<span class="cw-badge" style="background:#fee2e2;color:#991b1b;">高潮页</span>'
+            if is_climax else ""
+        )
+
+        panels_html.append(f"""
+        <div class="cw-card" style="margin-bottom:12px;">
+            <h4 style="margin:0 0 8px 0;color:#1e293b;">
+                第 {page_num} 页 · {html.escape(template)} {climax_badge}
+                <span style="font-size:12px;color:#64748b;">
+                    ({len(panels)} 面板 · 平均情绪 {page.get('page_emotion_avg', 0):.2f})
+                </span>
+            </h4>
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                    <thead>
+                        <tr style="background:#f8fafc;color:#475569;">
+                            <th style="padding:6px 8px;text-align:left;">面板ID</th>
+                            <th style="padding:6px 8px;text-align:left;">序号</th>
+                            <th style="padding:6px 8px;text-align:left;">景别</th>
+                            <th style="padding:6px 8px;text-align:left;">角度</th>
+                            <th style="padding:6px 8px;text-align:left;">动作</th>
+                            <th style="padding:6px 8px;text-align:left;">情绪</th>
+                            <th style="padding:6px 8px;text-align:left;">角色</th>
+                            <th style="padding:6px 8px;text-align:left;">提示词</th>
+                        </tr>
+                    </thead>
+                    <tbody>{''.join(panel_rows)}</tbody>
+                </table>
+            </div>
+        </div>
+        """)
+
+    return f'<div>{"".join(panels_html)}</div>'
+
+
+def render_review_full_detail(review_results: list[dict]) -> str:
+    """渲染完整审查详情（含 Schema 校验/质量评分/建议）。"""
+    if not review_results:
+        return '<div style="color:#64748b;padding:12px;">审查数据尚未生成。<br>请在「创作流程」Tab 运行工作流后查看。</div>'
+
+    cards = []
+    for r in review_results:
+        agent = r.get("agent", "?")
+        decision = r.get("decision", "?")
+        score = r.get("score", 0)
+        issues = r.get("issues", [])
+        suggestions = r.get("suggestions", [])
+        strengths = r.get("strengths", [])
+        dim_scores = r.get("dimension_scores", {})
+        schema_check = r.get("schema_check", {})
+        escalate = r.get("escalation", {}) or {}
+
+        color = {"pass": "#10b981", "revise": "#f59e0b", "escalate": "#ef4444"}.get(decision, "#94a3b8")
+        icon = {"pass": "✅", "revise": "🔄", "escalate": "⚠️"}.get(decision, "❓")
+
+        # Schema 校验
+        sc_html = ""
+        if schema_check:
+            passed = schema_check.get("passed", True)
+            missing = schema_check.get("missing_fields", [])
+            invalid = schema_check.get("invalid_fields", [])
+            errors = schema_check.get("errors", [])
+            sc_status = "✅ 通过" if passed else "❌ 未通过"
+            sc_html = (
+                f'<div style="font-size:12px;margin-top:6px;padding:6px;background:#f8fafc;'
+                f'border-radius:4px;">'
+                f'<b>Schema 校验: {sc_status}</b>'
+                + (f'<div style="color:#ef4444;">缺失: {", ".join(missing)}</div>' if missing else "")
+                + (f'<div style="color:#f59e0b;">无效: {", ".join(invalid)}</div>' if invalid else "")
+                + (f'<div style="color:#ef4444;">错误: {", ".join(errors)}</div>' if errors else "")
+                + f'</div>'
+            )
+
+        # 维度评分
+        dim_html = ""
+        if dim_scores:
+            bars = "".join(
+                f'<div style="display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0;">'
+                f'<span style="width:80px;text-align:right;color:#475569;">{html.escape(dim)}</span>'
+                f'<div style="flex:1;height:4px;background:#e2e8f0;border-radius:2px;overflow:hidden;">'
+                f'<div style="height:100%;width:{max(0, min(100, val * 10))}%;'
+                f'background:{_score_color(val)};"></div></div>'
+                f'<span style="width:32px;text-align:right;font-weight:600;">{val:.1f}</span>'
+                f'</div>'
+                for dim, val in dim_scores.items()
+            )
+            dim_html = f'<div style="margin:6px 0;padding:4px 8px;">{bars}</div>'
+
+        # 建议/优势/问题
+        issues_html = ""
+        if issues:
+            issues_html = (
+                f'<div style="font-size:11px;margin:4px 0;">'
+                f'<b style="color:#ef4444;">问题:</b> {"; ".join(html.escape(i) for i in issues[:5])}'
+                f'</div>'
+            )
+        strength_html = ""
+        if strengths:
+            strength_html = (
+                f'<div style="font-size:11px;margin:4px 0;">'
+                f'<b style="color:#10b981;">优势:</b> {"; ".join(html.escape(s) for s in strengths[:3])}'
+                f'</div>'
+            )
+        suggestion_html = ""
+        if suggestions:
+            suggestion_html = (
+                f'<div style="font-size:11px;margin:4px 0;">'
+                f'<b style="color:#3b82f6;">建议:</b> {"; ".join(html.escape(s) for s in suggestions[:3])}'
+                f'</div>'
+            )
+
+        # 升级详情
+        escalate_html = ""
+        if escalate.get("headline"):
+            escalate_html = (
+                f'<div style="font-size:12px;margin:6px 0;padding:6px;background:#fef2f2;'
+                f'border-radius:4px;border-left:3px solid #ef4444;">'
+                f'<b>⚠️ 升级: {html.escape(escalate.get("headline", ""))}</b>'
+                f'<div style="color:#991b1b;">{html.escape(escalate.get("suggested_action", ""))}</div>'
+                f'</div>'
+            )
+
+        cards.append(f"""
+        <div class="cw-card" style="margin-bottom:10px;">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+                <span style="font-size:20px;">{icon}</span>
+                <span style="font-weight:600;color:#1e293b;">{html.escape(agent)}</span>
+                <span style="color:{color};font-weight:700;font-size:18px;">{score:.1f}</span>
+                <span class="cw-badge" style="background:{color}20;color:{color};font-weight:600;">
+                    {decision.upper()}</span>
+            </div>
+            {dim_html}
+            {sc_html}
+            {strength_html}
+            {issues_html}
+            {suggestion_html}
+            {escalate_html}
+        </div>
+        """)
+
+    return f'<div>{"".join(cards)}</div>'
+
+
+def _score_color(val: float) -> str:
+    if val >= 7:
+        return "linear-gradient(90deg, #10b981, #34d399)"
+    if val >= 4:
+        return "linear-gradient(90deg, #fbbf24, #f59e0b)"
+    return "linear-gradient(90deg, #f87171, #ef4444)"

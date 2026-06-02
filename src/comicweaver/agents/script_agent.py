@@ -53,33 +53,136 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
         return await self._run_local(inputs, context)
 
     async def _run_api(self, inputs: ScriptInput, context: AgentContext) -> ScriptOutput:
+        from pydantic import ValidationError
+
         client = OpenAICompatibleLLMClient(self.config.llm)
-        payload = {
-            "task": "generate_structured_comic_script",
-            "input_schema": ScriptInput.model_json_schema(),
-            "output_schema": ScriptOutput.model_json_schema(),
-            "input": inputs.model_dump(mode="json"),
-            "context": context.model_dump(mode="json"),
-            "requirements": [
-                "Return JSON only.",
-                "Use stable char_id and scene_id values.",
-                "Create an emotion_curve with one value per scene.",
-                "Keep scenes visually actionable for comic panels.",
-            ],
-        }
-        data = await asyncio.to_thread(
-            client.complete_json,
-            "You generate structured comic scripts for ComicWeaver.",
-            payload,
+
+        system_prompt = (
+            "You are a professional comic script writer for ComicWeaver, a multi-agent "
+            "comic creation system. Your task is to generate a structured comic script "
+            "from a user's story idea.\n\n"
+            "CRITICAL RULES:\n"
+            "1. Return a single JSON object matching this EXACT structure:\n"
+            '{\n'
+            '  "title": "A compelling title for the comic (DO NOT leave as Untitled)",\n'
+            '  "summary": "2-3 sentence summary of the story",\n'
+            '  "genre": ["action", "mystery"],\n'
+            '  "characters": [\n'
+            '    {\n'
+            '      "char_id": "char_000",\n'
+            '      "name": "Character Name",\n'
+            '      "role": "protagonist",\n'
+            '      "appearance": "Detailed visual description (hair, eyes, clothing, build)",\n'
+            '      "personality": "Key personality traits",\n'
+            '      "first_appearance_scene": 0\n'
+            '    }\n'
+            '  ],\n'
+            '  "scenes": [\n'
+            '    {\n'
+            '      "scene_id": "scene_000",\n'
+            '      "order": 0,\n'
+            '      "location": "Specific location name",\n'
+            '      "time_of_day": "morning/afternoon/evening/night",\n'
+            '      "atmosphere": "Mood description (e.g., tense, peaceful, melancholic)",\n'
+            '      "characters_present": ["char_000"],\n'
+            '      "actions": [{"actor": "char_000", "description": "Action description"}],\n'
+            '      "dialogues": [{"speaker": "char_000", "text": "Dialogue line", "tone": "neutral"}],\n'
+            '      "narration": null,\n'
+            '      "emotion_intensity": 0.5,\n'
+            '      "panel_hint": 2\n'
+            '    }\n'
+            '  ],\n'
+            '  "emotion_curve": [0.3, 0.5, 0.8, 0.4],\n'
+            '  "narrative_structure": {\n'
+            '    "setup_scenes": [0],\n'
+            '    "rising_scenes": [1],\n'
+            '    "climax_scenes": [2],\n'
+            '    "resolution_scenes": [3],\n'
+            '    "pacing": "varied"\n'
+            '  }\n'
+            '}\n\n'
+            "2. Use char_id values like char_000, char_001, char_002.\n"
+            "3. Use scene_id values like scene_000, scene_001, etc.\n"
+            "4. role must be one of: protagonist, antagonist, supporting, extra.\n"
+            "5. emotion_intensity ranges from 0.0 (calm) to 1.0 (intense climax).\n"
+            "6. emotion_curve must have ONE value per scene, in scene order.\n"
+            "7. narrative_structure arrays contain scene INDICES (order field values).\n"
+            "8. Each scene should have at least 1 action and 1 dialogue.\n"
+            "9. Make each scene VISUALLY DESCRIPTIVE for comic panel illustration.\n"
+            "10. Title must be creative and specific, never 'Untitled'.\n"
+            "11. Output ONLY the JSON object, no markdown wrapping, no extra text."
         )
-        output = ScriptOutput.model_validate(data)
+
+        target_pages = inputs.target_pages
+        # 根据页数推断场景数：每页约 2-4 个面板 → 2-4 个场景，最少 4 个场景
+        target_scenes = max(4, target_pages * 2)
+
+        user_message = (
+            f"Create a comic script based on this story idea:\n\n"
+            f'"{inputs.raw_text}"\n\n'
+            f"Parameters:\n"
+            f"- Target pages: {target_pages}\n"
+            f"- Target scenes: {target_scenes} (approximately {target_pages} pages × 2-3 panels each)\n"
+            f"- Style: {inputs.style_hint or 'manga'}\n"
+            f"- Language: {inputs.language}\n"
+            f"- Character count: 2-3\n\n"
+            f"Create a complete story arc with clear setup, rising action, climax, and resolution. "
+            f"Distribute the {target_scenes} scenes evenly across the narrative structure. "
+            f"Each scene must have vivid visual descriptions that a comic artist can draw."
+        )
+
+        payload = {"user_message": user_message}
+
+        # 尝试 LLM 调用，失败时回退到本地
+        try:
+            data = await asyncio.to_thread(
+                client.complete_json,
+                system_prompt,
+                payload,
+            )
+        except ApiBackendError:
+            # API 连接/响应错误 → 回退本地
+            if not self.config.runtime.fallback_to_local:
+                raise
+            return await self._run_local(inputs, context)
+
+        # 尝试 Pydantic 验证，失败时重试一次或回退
+        try:
+            output = ScriptOutput.model_validate(data)
+        except ValidationError as ve:
+            # 可能是 LLM 返回了嵌套结构（如 {"script": {...}}）
+            if len(data) == 1 and isinstance(list(data.values())[0], dict):
+                try:
+                    output = ScriptOutput.model_validate(list(data.values())[0])
+                except ValidationError:
+                    if self.config.runtime.fallback_to_local:
+                        return await self._run_local(inputs, context)
+                    raise ApiBackendError(
+                        f"LLM response validation failed after unwrap: {ve}"
+                    ) from ve
+            elif self.config.runtime.fallback_to_local:
+                return await self._run_local(inputs, context)
+            else:
+                raise ApiBackendError(
+                    f"LLM response validation failed: {ve}"
+                ) from ve
+
+        # 质量检查：如果标题为空/Untitled，补充处理
+        title = output.title
+        if not title or title.strip().lower() in ("untitled", "无题", ""):
+            title = _make_title(inputs.raw_text)
+            output = output.model_copy(update={"title": title})
+
         return output.model_copy(update={
             "meta": AgentOutputMeta(
                 agent=self.name,
                 version=self.version,
                 inputs_hash=self._inputs_hash(inputs),
                 retry_count=context.retry_count,
-                self_check_notes=[f"LLM API provider: {self.config.llm.provider}"],
+                self_check_notes=[
+                    f"LLM API provider: {self.config.llm.provider}",
+                    f"Generated {len(output.scenes)} scenes, {len(output.characters)} characters",
+                ],
             )
         })
 

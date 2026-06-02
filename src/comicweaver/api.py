@@ -33,7 +33,7 @@ class ChatCompletionRequest(BaseModel):
     messages: list[ChatMessage]
     temperature: float = 0.3
     max_tokens: int = 4096
-    response_format: dict[str, str] = Field(default_factory=lambda: {"type": "json_object"})
+    response_format: dict[str, str] | None = Field(default_factory=lambda: {"type": "json_object"})
 
 
 class ChatCompletionResponse(BaseModel):
@@ -42,10 +42,24 @@ class ChatCompletionResponse(BaseModel):
     latency_ms: int = 0
 
     def json_content(self) -> dict[str, Any]:
+        text = self.content.strip()
+        # 移除常见 markdown 代码块包装（某些模型即使要求纯 JSON 也会加）
+        if text.startswith("```"):
+            # 找到第一个换行后的内容
+            first_newline = text.find("\n")
+            if first_newline > 0:
+                text = text[first_newline + 1:]
+            # 移除结尾的 ```
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
         try:
-            value = json.loads(self.content)
+            value = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise ApiBackendError(f"LLM response is not valid JSON: {exc}") from exc
+            raise ApiBackendError(
+                f"LLM response is not valid JSON: {exc}. "
+                f"Raw content (first 200 chars): {self.content[:200]}"
+            ) from exc
         if not isinstance(value, dict):
             raise ApiBackendError("LLM response JSON must be an object")
         return value
@@ -63,32 +77,52 @@ class OpenAICompatibleLLMClient:
         if not self.available:
             raise ApiBackendError("LLM API is not configured")
 
-        request_payload = ChatCompletionRequest(
-            model=self.config.model,
-            messages=[
-                ChatMessage(role="system", content=system_prompt),
-                ChatMessage(
-                    role="user",
-                    content=json.dumps(user_payload, ensure_ascii=False),
-                ),
-            ],
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-        ).model_dump()
+        messages = [
+            ChatMessage(role="system", content=system_prompt),
+            ChatMessage(
+                role="user",
+                content=json.dumps(user_payload, ensure_ascii=False),
+            ),
+        ]
 
-        started = time.time()
-        raw = self._post_json(self._completion_url(), request_payload)
-        choices = raw.get("choices") or []
-        if not choices:
-            raise ApiBackendError("LLM response does not contain choices")
-        message = choices[0].get("message") or {}
-        content = message.get("content") or ""
-        response = ChatCompletionResponse(
-            content=content,
-            raw=raw,
-            latency_ms=int((time.time() - started) * 1000),
-        )
-        return response.json_content()
+        # 方法 1：带 response_format json_object；失败则不加
+        last_error: Exception | None = None
+        for attempt in range(2):
+            req = ChatCompletionRequest(
+                model=self.config.model,
+                messages=messages,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+            )
+            if attempt == 0:
+                req.response_format = {"type": "json_object"}
+            else:
+                # 重试时去除 response_format 约束
+                req.response_format = None  # type: ignore[assignment]
+
+            request_payload = req.model_dump(exclude_none=True)
+
+            try:
+                started = time.time()
+                raw = self._post_json(self._completion_url(), request_payload)
+                choices = raw.get("choices") or []
+                if not choices:
+                    raise ApiBackendError("LLM response does not contain choices")
+                message = choices[0].get("message") or {}
+                content = message.get("content") or ""
+                response = ChatCompletionResponse(
+                    content=content,
+                    raw=raw,
+                    latency_ms=int((time.time() - started) * 1000),
+                )
+                return response.json_content()
+            except ApiBackendError as exc:
+                last_error = exc
+                if attempt == 0:
+                    continue  # 用不带 json_object 的方式重试
+                raise
+
+        raise last_error or ApiBackendError("LLM call failed after retries")
 
     def _completion_url(self) -> str:
         base = self.config.base_url.rstrip("/")

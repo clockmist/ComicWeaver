@@ -183,4 +183,88 @@ CUSTOM_CSS = """
     background: #dbeafe;
     color: #1e40af;
 }
+
+/* ===== Agent 输出面板 ===== */
+.cw-agent-output-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    overflow: hidden;
+    transition: box-shadow 0.2s;
+}
+.cw-agent-output-card:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.cw-agent-output-header {
+    padding: 12px 16px;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* ===== 开发者日志 ===== */
+.cw-dev-log {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 12px;
+}
+
+/* ===== 筛选按钮组 ===== */
+.cw-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+.cw-filter-btn {
+    padding: 4px 10px;
+    border-radius: 14px;
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    font-size: 11px;
+    cursor: pointer;
+    color: #475569;
+    transition: all 0.15s;
+}
+.cw-filter-btn:hover {
+    background: #e2e8f0;
+    border-color: #94a3b8;
+}
+.cw-filter-btn.active {
+    background: #1e40af;
+    color: white;
+    border-color: #1e40af;
+    font-weight: 600;
+}
+
+/* ===== 状态统计卡片 ===== */
+.cw-stat-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+.cw-stat-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px 16px;
+    min-width: 100px;
+    text-align: center;
+}
+.cw-stat-card .number {
+    font-size: 24px;
+    font-weight: 700;
+    color: #1e293b;
+}
+.cw-stat-card .label {
+    font-size: 11px;
+    color: #64748b;
+    margin-top: 2px;
+}
 """

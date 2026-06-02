@@ -19,15 +19,24 @@ from comicweaver.storage import save_project, state_to_project
 
 from .html_widgets import (
     render_agent_grid,
+    render_agent_outputs,
+    render_character_profiles,
     render_checkpoint,
+    render_dev_log,
     render_emotion_curve,
     render_log,
+    render_panel_images_gallery,
+    render_performance_summary,
+    render_review_full_detail,
     render_review_history,
     render_score_bars,
     render_script_summary,
+    render_storyboard_detail,
     render_storyboard_preview,
 )
 from .styles import CUSTOM_CSS
+
+from comicweaver.utils.logging import DevLogEntry
 
 # ============================================================================
 # 应用会话状态(单进程单用户简化方案)
@@ -46,6 +55,9 @@ class Session:
         self.last_checkpoint: dict | None = None
         self.workflow_done: bool = False
         self.error: str | None = None
+        # 新增：Agent 输出和开发者日志收集
+        self.agent_outputs: dict[str, list[dict]] = {}  # agent_id -> [output dicts]
+        self.dev_log: list[dict] = []                    # DevLogEntry dicts
         # asyncio 资源
         self._task: asyncio.Task | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -59,6 +71,8 @@ class Session:
         self.workflow_done = False
         self.error = None
         self.workflow = None
+        self.agent_outputs = {}
+        self.dev_log = []
         self._task = None
         self._loop = None
 
@@ -145,13 +159,61 @@ async def _consume_workflow(session: Session) -> None:
                         save_project(proj)
                 continue
 
-            # StreamEvent
-            if hasattr(msg, "agent") and hasattr(msg, "type"):
+            # DevLogEntry
+            if isinstance(msg, DevLogEntry):
+                session.dev_log.append(msg.to_dict())
+                # 同时在事件日志中显示简化版本
                 session.event_log.append({
                     "agent": msg.agent,
-                    "type": msg.type.value if hasattr(msg.type, "value") else str(msg.type),
-                    "content": msg.content if not isinstance(msg.content, dict)
-                                else f"[partial] {list(msg.content.keys())}",
+                    "type": f"dev_{msg.category.value}",
+                    "content": f"[{msg.level.value}] {msg.message[:120]}",
+                    "timestamp": msg.timestamp,
+                })
+                continue
+
+            # StreamEvent
+            if hasattr(msg, "agent") and hasattr(msg, "type"):
+                evt_type = (
+                    msg.type.value if hasattr(msg.type, "value")
+                    else str(msg.type)
+                )
+                # 改进：dict 内容显示实际摘要而非仅 key 列表
+                content = msg.content
+                if isinstance(content, dict):
+                    if evt_type == "done":
+                        # DONE 事件：保存完整输出按 agent 归类
+                        agent_name = msg.agent
+                        out_list = session.agent_outputs.setdefault(agent_name, [])
+                        out_list.append({
+                            "panel_id": content.get("panel_id", ""),
+                            "title": content.get("title", ""),
+                            "output": content,
+                            "timestamp": msg.timestamp,
+                        })
+                        # 日志中显示摘要
+                        keys = list(content.keys())
+                        summary = f"✓ 完成 · 输出 {len(content)} 个字段: {', '.join(keys[:8])}"
+                        if len(keys) > 8:
+                            summary += f" ...+{len(keys) - 8}"
+                        content = summary
+                    else:
+                        # PARTIAL_OUTPUT 等：显示 top 级别 key + 值摘要
+                        parts = []
+                        for k, v in list(content.items())[:5]:
+                            if isinstance(v, list):
+                                parts.append(f"{k}=[{len(v)} items]")
+                            elif isinstance(v, dict):
+                                parts.append(f"{k}={{...{len(v)} keys}}")
+                            elif isinstance(v, str) and len(v) > 40:
+                                parts.append(f"{k}='{v[:40]}...'")
+                            else:
+                                parts.append(f"{k}={v}")
+                        content = "; ".join(parts)
+
+                session.event_log.append({
+                    "agent": msg.agent,
+                    "type": evt_type,
+                    "content": content,
                     "timestamp": msg.timestamp,
                 })
     except Exception as exc:  # noqa: BLE001
@@ -349,6 +411,73 @@ def load_results() -> tuple[str, str, str, str, list]:
     )
 
 
+def load_agent_outputs_tab() -> tuple[str, str, str, str, str]:
+    """加载 Agent 输出 Tab 的所有内容。"""
+    if SESSION.state is None:
+        empty = '<div style="color:#64748b;padding:12px;">请先创建项目并运行工作流</div>'
+        return empty, empty, empty, empty, empty
+
+    agent_outputs = SESSION.agent_outputs
+    character_db = SESSION.state.get("character_db") or {}
+    plan = SESSION.state.get("storyboard_plan", []) or []
+    panel_images = SESSION.state.get("panel_images", []) or []
+    reviews = SESSION.state.get("review_results", []) or []
+
+    return (
+        render_agent_outputs(agent_outputs),
+        render_character_profiles(character_db, agent_outputs),
+        render_panel_images_gallery(panel_images),
+        render_storyboard_detail(plan),
+        render_review_full_detail(reviews),
+    )
+
+
+def load_dev_log_tab(filter_category: str = "all",
+                     filter_level: str = "all") -> tuple[str, str, str]:
+    """加载开发者日志 Tab 的所有内容。"""
+    dev_entries = SESSION.dev_log
+    if not dev_entries:
+        empty = '<div style="color:#64748b;padding:12px;">暂无开发者日志。<br>请在「创作流程」Tab 启动工作流后自动生成。</div>'
+        return empty, empty, empty
+
+    # 统计
+    error_count = sum(1 for e in dev_entries if e.get("level") == "error")
+    warn_count = sum(1 for e in dev_entries if e.get("level") == "warn")
+    perf_count = sum(1 for e in dev_entries if e.get("category") == "performance")
+    input_count = sum(1 for e in dev_entries if e.get("category") == "agent_input")
+
+    stats_html = f"""
+    <div class="cw-stat-row">
+        <div class="cw-stat-card">
+            <div class="number">{len(dev_entries)}</div>
+            <div class="label">总日志条数</div>
+        </div>
+        <div class="cw-stat-card" style="border-color:#ef4444;">
+            <div class="number" style="color:#ef4444;">{error_count}</div>
+            <div class="label">错误</div>
+        </div>
+        <div class="cw-stat-card" style="border-color:#f59e0b;">
+            <div class="number" style="color:#f59e0b;">{warn_count}</div>
+            <div class="label">警告</div>
+        </div>
+        <div class="cw-stat-card" style="border-color:#06b6d4;">
+            <div class="number" style="color:#06b6d4;">{perf_count}</div>
+            <div class="label">性能记录</div>
+        </div>
+        <div class="cw-stat-card" style="border-color:#3b82f6;">
+            <div class="number" style="color:#3b82f6;">{input_count}</div>
+            <div class="label">输入追踪</div>
+        </div>
+    </div>
+    """
+
+    return (
+        stats_html,
+        render_dev_log(dev_entries, filter_category, filter_level),
+        render_performance_summary(dev_entries),
+    )
+
+
 # ============================================================================
 # UI 构建
 # ============================================================================
@@ -502,7 +631,7 @@ def build_ui() -> gr.Blocks:
                               checkpoint_html, score_html],
                 )
 
-            # ---- Tab 3 ----
+            # ---- Tab 3: 结果浏览（增强）----
             with gr.Tab("📖 结果浏览"):
                 gr.Markdown("### 查看各阶段产出")
                 load_btn = gr.Button("🔄 刷新结果", variant="primary")
@@ -529,30 +658,106 @@ def build_ui() -> gr.Blocks:
                               review_html, page_gallery],
                 )
 
-            # ---- Tab 4: 关于 ----
+            # ---- Tab 4: Agent 输出详情 ----
+            with gr.Tab("📊 Agent输出"):
+                gr.Markdown("### 各 Agent 的完整输入/输出详情")
+                load_agent_btn = gr.Button("🔄 刷新 Agent 输出", variant="primary")
+
+                with gr.Accordion("📦 原始输出结构", open=True):
+                    agent_outputs_html = gr.HTML()
+                with gr.Accordion("👤 角色档案", open=False):
+                    character_profiles_html = gr.HTML()
+                with gr.Accordion("🎨 面板图像画廊", open=False):
+                    panel_gallery_html = gr.HTML()
+                with gr.Accordion("🎬 分镜详细规划", open=False):
+                    storyboard_detail_html = gr.HTML()
+                with gr.Accordion("✅ 审查完整详情", open=False):
+                    review_full_html = gr.HTML()
+
+                load_agent_btn.click(
+                    load_agent_outputs_tab,
+                    outputs=[agent_outputs_html, character_profiles_html,
+                              panel_gallery_html, storyboard_detail_html,
+                              review_full_html],
+                )
+
+            # ---- Tab 5: 开发者日志 ----
+            with gr.Tab("🔧 开发者日志"):
+                gr.Markdown("### 结构化开发者日志（Agent 输入/输出/性能/错误）")
+
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        filter_category = gr.Dropdown(
+                            label="筛选类别",
+                            choices=[
+                                ("全部", "all"),
+                                ("Agent 输入", "agent_input"),
+                                ("Agent 输出", "agent_output"),
+                                ("状态变更", "state_change"),
+                                ("审查决策", "review_decision"),
+                                ("错误", "error"),
+                                ("性能", "performance"),
+                                ("确认点", "checkpoint"),
+                                ("工作流", "workflow"),
+                            ],
+                            value="all",
+                        )
+                    with gr.Column(scale=1):
+                        filter_level = gr.Dropdown(
+                            label="筛选级别",
+                            choices=[
+                                ("全部", "all"),
+                                ("TRACE", "trace"),
+                                ("DEBUG", "debug"),
+                                ("INFO", "info"),
+                                ("WARN", "warn"),
+                                ("ERROR", "error"),
+                                ("PERF", "perf"),
+                            ],
+                            value="all",
+                        )
+                    with gr.Column(scale=1):
+                        refresh_dev_btn = gr.Button("🔄 刷新日志", variant="primary")
+
+                dev_stats_html = gr.HTML()
+                dev_log_html = gr.HTML()
+                with gr.Accordion("⏱ 性能统计", open=False):
+                    perf_summary_html = gr.HTML()
+
+                refresh_dev_btn.click(
+                    load_dev_log_tab,
+                    inputs=[filter_category, filter_level],
+                    outputs=[dev_stats_html, dev_log_html, perf_summary_html],
+                )
+
+            # ---- Tab 6: 关于 ----
             with gr.Tab("ℹ️ 关于"):
                 gr.Markdown("""
-                ## ComicWeaver v0.1.0 - 初始框架
+                ## ComicWeaver v0.2.0 — LangGraph 重构版
 
-                **当前状态:** 默认使用本地 fallback,可通过配置接入 LLM API 与 ComfyUI。
-                未配置真实后端时运行无需 GPU。
+                **当前状态:** 基于 LangGraph 工作流引擎，默认使用本地 fallback，
+                可通过配置接入 LLM API 与 ComfyUI。未配置真实后端时运行无需 GPU。
 
                 ### 系统组成
                 - **5 个生产 Agent:** 剧本 / 角色 / 分镜 / 图像 / 排版
-                - **1 个审查 Agent:** 横向贯穿,质量守门
-                - **编排层:** 支持 LangGraph 风格的状态机工作流
+                - **1 个审查 Agent:** 横向贯穿，质量守门
+                - **编排层:** 基于 LangGraph StateGraph 的工作流引擎
                 - **3 种交互模式:** 半自动 / 全自动 / 全交互
+                - **开发者日志:** 结构化 Agent 输入/输出/性能/错误追踪
 
-                ### 后续迭代
-                1. 接入真实 LLM (Qwen2.5-7B / ChatGLM4)
-                2. 接入 ComfyUI / SDXL 图像生成
-                3. 实现 IP-Adapter 链式参考机制
-                4. 完善对话气泡的智能避让算法
-                5. 多格式导出 (PDF / PSD)
+                ### 新增功能 (v0.2.0)
+                1. LangGraph StateGraph 重构编排层
+                2. 完整的 Agent 输入/输出可视化
+                3. 结构化开发者日志系统（5 个级别 × 8 个类别）
+                4. 面板图像独立画廊
+                5. 分镜详细规划展示
+                6. 角色档案卡片 + 参考图预览
+                7. 完整审查详情（Schema 校验/质量评分/升级处理）
+                8. 性能计时统计
 
                 ### 文档
-                - [设计文档](docs/开发思路框架.md)
-                - [Agent 接口规范](docs/agents/README.md)
+                - [LangGraph 重构说明](LangGraph重构说明.md)
+                - [UI输出与日志改进方案](UI输出与日志改进方案.md)
                 """)
 
         gr.HTML("""

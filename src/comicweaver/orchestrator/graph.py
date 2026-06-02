@@ -6,6 +6,7 @@ ComicWorkflow 类保持向后兼容的 arun()/respond() 接口。
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -41,6 +42,24 @@ from comicweaver.core import (
     ScriptInput,
     StoryboardInput,
     StreamEventType,
+)
+from comicweaver.utils.logging import (
+    DevLogEntry,
+    log_agent_error,
+    log_agent_input,
+    log_agent_output,
+    log_checkpoint,
+    log_fallback,
+    log_performance,
+    log_review,
+    log_state_change,
+    log_workflow_event,
+    summarize_character_output,
+    summarize_image_output,
+    summarize_layout_output,
+    summarize_review_output,
+    summarize_script_output,
+    summarize_storyboard_output,
 )
 
 from .types import CheckpointSignal, WorkflowEvent, WorkflowMessage, should_pause
@@ -118,6 +137,10 @@ def _make_checkpoint_node(checkpoint_id: str):
 
         # 使用 LangGraph interrupt 暂停工作流
         decision = interrupt(signal)
+
+        # 开发者日志：确认点交互
+        writer = get_stream_writer()
+        writer(log_checkpoint(checkpoint_id, decision))
 
         # 记录用户决策（resume 后由 LangGraph 状态管理持久化）
         state.setdefault("user_decisions", []).append({
@@ -241,8 +264,10 @@ class ComicWorkflow:
     # ------------------------------------------------------------------
 
     async def _node_script(self, state: ComicState) -> ComicState:
+        t0 = time.perf_counter()
         writer = get_stream_writer()
         writer(WorkflowMessage(WorkflowEvent.NODE_START, "script_agent"))
+        writer(log_workflow_event("进入阶段", "script"))
 
         state["current_phase"] = "script"
         ctx = self._make_context(state)
@@ -253,18 +278,38 @@ class ComicWorkflow:
             style_hint=state.get("style_preset", "manga"),
         )
 
-        async for evt in self.script_agent.astream(inputs, ctx):
-            writer(evt)
-            if evt.type == StreamEventType.DONE and evt.content:
-                state["structured_script"] = evt.content
-                state["emotion_curve"] = evt.content.get("emotion_curve", [])
+        # 开发者日志：Agent 输入
+        writer(log_agent_input("script_agent", {
+            "creation_mode": inputs.creation_mode.value,
+            "raw_text": inputs.raw_text[:200],
+            "target_pages": inputs.target_pages,
+            "style_hint": inputs.style_hint or "none",
+        }))
 
+        try:
+            async for evt in self.script_agent.astream(inputs, ctx):
+                writer(evt)
+                if evt.type == StreamEventType.DONE and evt.content:
+                    state["structured_script"] = evt.content
+                    state["emotion_curve"] = evt.content.get("emotion_curve", [])
+                    # 开发者日志：Agent 输出摘要
+                    writer(log_agent_output("script_agent",
+                        summarize_script_output(evt.content)))
+        except Exception:
+            writer(log_agent_error("script_agent", "执行失败",
+                {"raw_text": inputs.raw_text[:100]}))
+            raise
+
+        elapsed = (time.perf_counter() - t0) * 1000
+        writer(log_performance("script_agent", elapsed))
         writer(WorkflowMessage(WorkflowEvent.NODE_END, "script_agent"))
         return state
 
     async def _node_character(self, state: ComicState) -> ComicState:
+        t0 = time.perf_counter()
         writer = get_stream_writer()
         writer(WorkflowMessage(WorkflowEvent.NODE_START, "character_agent"))
+        writer(log_workflow_event("进入阶段", "character"))
 
         state["current_phase"] = "character"
         ctx = self._make_context(state)
@@ -279,17 +324,36 @@ class ComicWorkflow:
             style_preset=state.get("style_preset", "manga"),
         )
 
-        async for evt in self.character_agent.astream(inputs, ctx):
-            writer(evt)
-            if evt.type == StreamEventType.DONE and evt.content:
-                state["character_db"] = evt.content.get("character_db") or {}
+        # 开发者日志：Agent 输入
+        writer(log_agent_input("character_agent", {
+            "operation": "init",
+            "draft_count": len(drafts),
+            "draft_names": [d.name for d in drafts],
+            "style_preset": state.get("style_preset", "manga"),
+        }))
 
+        try:
+            async for evt in self.character_agent.astream(inputs, ctx):
+                writer(evt)
+                if evt.type == StreamEventType.DONE and evt.content:
+                    state["character_db"] = evt.content.get("character_db") or {}
+                    writer(log_agent_output("character_agent",
+                        summarize_character_output(evt.content)))
+        except Exception:
+            writer(log_agent_error("character_agent", "执行失败",
+                {"drafts": [d.name for d in drafts]}))
+            raise
+
+        elapsed = (time.perf_counter() - t0) * 1000
+        writer(log_performance("character_agent", elapsed))
         writer(WorkflowMessage(WorkflowEvent.NODE_END, "character_agent"))
         return state
 
     async def _node_storyboard(self, state: ComicState) -> ComicState:
+        t0 = time.perf_counter()
         writer = get_stream_writer()
         writer(WorkflowMessage(WorkflowEvent.NODE_START, "storyboard_agent"))
+        writer(log_workflow_event("进入阶段", "storyboard"))
 
         state["current_phase"] = "storyboard"
         ctx = self._make_context(state)
@@ -306,43 +370,94 @@ class ComicWorkflow:
             target_pages=state.get("target_pages", 4),
         )
 
-        async for evt in self.storyboard_agent.astream(inputs, ctx):
-            writer(evt)
-            if evt.type == StreamEventType.DONE and evt.content:
-                state["storyboard_plan"] = evt.content.get("pages", [])
+        # 开发者日志：Agent 输入
+        writer(log_agent_input("storyboard_agent", {
+            "scene_count": len(scenes),
+            "emotion_curve_peaks": (
+                max(state.get("emotion_curve", [0])) if state.get("emotion_curve") else 0
+            ),
+            "target_pages": inputs.target_pages,
+            "has_character_db": cdb is not None,
+        }))
 
+        try:
+            async for evt in self.storyboard_agent.astream(inputs, ctx):
+                writer(evt)
+                if evt.type == StreamEventType.DONE and evt.content:
+                    state["storyboard_plan"] = evt.content.get("pages", [])
+                    writer(log_agent_output("storyboard_agent",
+                        summarize_storyboard_output(evt.content)))
+        except Exception:
+            writer(log_agent_error("storyboard_agent", "执行失败",
+                {"scene_count": len(scenes), "target_pages": inputs.target_pages}))
+            raise
+
+        elapsed = (time.perf_counter() - t0) * 1000
+        writer(log_performance("storyboard_agent", elapsed))
         writer(WorkflowMessage(WorkflowEvent.NODE_END, "storyboard_agent"))
         return state
 
     async def _node_image(self, state: ComicState) -> ComicState:
+        t0 = time.perf_counter()
         writer = get_stream_writer()
         writer(WorkflowMessage(WorkflowEvent.NODE_START, "image_agent"))
+        writer(log_workflow_event("进入阶段", "image"))
 
         state["current_phase"] = "image"
         ctx = self._make_context(state)
         pages = [PageLayout.model_validate(p) for p in state.get("storyboard_plan", [])]
         all_panel_images: list[dict] = []
+        total_panels = sum(len(page.panels) for page in pages)
 
+        writer(log_agent_input("image_agent", {
+            "total_panels": total_panels,
+            "style_preset": state.get("style_preset", "manga"),
+            "backend_preference": "auto",
+        }))
+
+        panel_idx = 0
         for page in pages:
             for panel in page.panels:
+                panel_idx += 1
                 inputs = ImageInput(
                     panel_plan=panel,
                     style_preset=state.get("style_preset", "manga"),
                 )
-                async for evt in self.image_agent.astream(inputs, ctx):
-                    writer(evt)
-                    if evt.type == StreamEventType.DONE and evt.content:
-                        pi = evt.content.get("panel_image")
-                        if pi:
-                            all_panel_images.append(pi)
+                try:
+                    async for evt in self.image_agent.astream(inputs, ctx):
+                        writer(evt)
+                        if evt.type == StreamEventType.DONE and evt.content:
+                            pi = evt.content.get("panel_image")
+                            if pi:
+                                all_panel_images.append(pi)
+                            # 检测 fallback
+                            backend_used = evt.content.get("backend_used", "?")
+                            fallback_chain = evt.content.get("fallback_chain", [])
+                            if fallback_chain and len(fallback_chain) > 1:
+                                writer(log_fallback(
+                                    "image_agent",
+                                    fallback_chain[0],
+                                    fallback_chain[-1],
+                                ))
+                            writer(log_agent_output("image_agent",
+                                summarize_image_output(evt.content)))
+                except Exception:
+                    writer(log_agent_error("image_agent",
+                        f"面板 {panel.panel_id} 生成失败",
+                        {"panel_id": panel.panel_id, "panel_idx": panel_idx}))
+                    raise
 
         state["panel_images"] = all_panel_images
+        elapsed = (time.perf_counter() - t0) * 1000
+        writer(log_performance("image_agent", elapsed, status=f"{len(all_panel_images)}/{total_panels} panels"))
         writer(WorkflowMessage(WorkflowEvent.NODE_END, "image_agent"))
         return state
 
     async def _node_layout(self, state: ComicState) -> ComicState:
+        t0 = time.perf_counter()
         writer = get_stream_writer()
         writer(WorkflowMessage(WorkflowEvent.NODE_START, "layout_agent"))
+        writer(log_workflow_event("进入阶段", "layout"))
 
         state["current_phase"] = "layout"
         ctx = self._make_context(state)
@@ -358,12 +473,29 @@ class ComicWorkflow:
             style_preset=state.get("style_preset", "manga"),
         )
 
-        async for evt in self.layout_agent.astream(inputs, ctx):
-            writer(evt)
-            if evt.type == StreamEventType.DONE and evt.content:
-                state["final_pages"] = evt.content.get("final_pages", [])
-                state["exports"] = evt.content.get("exports", [])
+        # 开发者日志：Agent 输入
+        writer(log_agent_input("layout_agent", {
+            "page_count": len(pages),
+            "panel_image_count": len(panel_imgs),
+            "panel_ids": list(panel_imgs.keys()),
+            "export_formats": inputs.export_formats,
+        }))
 
+        try:
+            async for evt in self.layout_agent.astream(inputs, ctx):
+                writer(evt)
+                if evt.type == StreamEventType.DONE and evt.content:
+                    state["final_pages"] = evt.content.get("final_pages", [])
+                    state["exports"] = evt.content.get("exports", [])
+                    writer(log_agent_output("layout_agent",
+                        summarize_layout_output(evt.content)))
+        except Exception:
+            writer(log_agent_error("layout_agent", "执行失败",
+                {"page_count": len(pages), "panel_count": len(panel_imgs)}))
+            raise
+
+        elapsed = (time.perf_counter() - t0) * 1000
+        writer(log_performance("layout_agent", elapsed))
         writer(WorkflowMessage(WorkflowEvent.NODE_END, "layout_agent"))
         return state
 
@@ -412,6 +544,7 @@ class ComicWorkflow:
         target_output: dict,
     ) -> ComicState:
         """对生产 Agent 的输出执行审查并更新 state。"""
+        t0 = time.perf_counter()
         writer = get_stream_writer()
         ctx = self._make_context(state)
         retry_counts = state.get("retry_counts", {})
@@ -425,11 +558,22 @@ class ComicWorkflow:
             max_retries=3,
         )
 
+        # 开发者日志：审查输入
+        writer(log_agent_input(f"reviewer({target_agent})", {
+            "target_agent": target_agent,
+            "rubric_id": target_rubric_id,
+            "retry_count": retry,
+            "max_retries": 3,
+            "target_keys": list(target_output.keys())[:10],
+        }))
+
         result: dict[str, Any] = {}
         async for evt in self.reviewer.astream(review_input, ctx):
             writer(evt)
             if evt.type == StreamEventType.DONE and evt.content:
                 result = evt.content
+                writer(log_agent_output(f"reviewer({target_agent})",
+                    summarize_review_output(evt.content)))
 
         if not result:
             return state
@@ -442,6 +586,15 @@ class ComicWorkflow:
             "score": feedback.overall_score,
             "issues": feedback.issues,
         })
+
+        # 开发者日志：审查决策
+        writer(log_review(
+            target_agent,
+            feedback.decision.value,
+            feedback.overall_score,
+            dimension_scores=feedback.dimension_scores,
+            issues=feedback.issues,
+        ))
 
         if feedback.decision == ReviewDecision.PASS:
             writer(WorkflowMessage(
@@ -464,6 +617,8 @@ class ComicWorkflow:
                 },
             ))
 
+        elapsed = (time.perf_counter() - t0) * 1000
+        writer(log_performance(f"reviewer({target_agent})", elapsed))
         return state
 
     # ------------------------------------------------------------------
@@ -476,13 +631,16 @@ class ComicWorkflow:
         内部使用 LangGraph astream 驱动节点执行。
         当遇到 interrupt() 确认点时暂停，等待 respond() 后继续。
         """
+        workflow_t0 = time.perf_counter()
         yield WorkflowMessage(WorkflowEvent.NODE_START, "workflow")
+        yield log_workflow_event("工作流启动", f"project={state.get('project_id', '?')}, mode={state.get('interaction_mode', '?')}")
 
         config: dict[str, Any] = {
             "configurable": {"thread_id": state.get("project_id", "default")}
         }
         self._current_config = config
         input_data: Any = state  # 初始输入为完整 state
+        prev_phase = state.get("current_phase", "init")
 
         try:
             while True:
@@ -501,6 +659,11 @@ class ComicWorkflow:
                             if isinstance(node_update, dict):
                                 for key, value in node_update.items():
                                     state[key] = value  # type: ignore[literal-required]
+                                # 检测阶段变更
+                                new_phase = node_update.get("current_phase")
+                                if new_phase and new_phase != prev_phase:
+                                    yield log_state_change(prev_phase, new_phase)
+                                    prev_phase = new_phase
 
                 # 检查是否需要处理 interrupt
                 snapshot = self._compiled.get_state(config)
@@ -527,6 +690,7 @@ class ComicWorkflow:
 
                         if decision == "skip":
                             # 中止工作流
+                            yield log_workflow_event("工作流中止", f"用户在 {interrupt_value.checkpoint_id} 选择了 skip")
                             return
 
                         # 用 Command(resume=...) 继续执行
@@ -537,12 +701,20 @@ class ComicWorkflow:
                     break
 
         except Exception as exc:  # noqa: BLE001
+            yield log_agent_error("workflow", str(exc),
+                {"type": exc.__class__.__name__, "phase": state.get("current_phase", "?")})
             yield WorkflowMessage(
                 WorkflowEvent.ERROR, "workflow",
                 {"error": str(exc), "type": exc.__class__.__name__},
             )
             raise
 
+        total_elapsed = (time.perf_counter() - workflow_t0) * 1000
+        yield log_performance("workflow(total)", total_elapsed)
+        yield log_workflow_event("工作流完成",
+            f"耗时 {total_elapsed:.0f}ms, "
+            f"reviews={len(state.get('review_results', []))}, "
+            f"pages={len(state.get('final_pages', []))}")
         yield WorkflowMessage(WorkflowEvent.WORKFLOW_DONE, "workflow", state)
 
     def respond(self, decision: str) -> None:
