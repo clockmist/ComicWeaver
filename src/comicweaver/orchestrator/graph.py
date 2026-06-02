@@ -409,19 +409,27 @@ class ComicWorkflow:
         all_panel_images: list[dict] = []
         total_panels = sum(len(page.panels) for page in pages)
 
+        # 加载 CharacterDB 供 ImageAgent 读取角色种子和外观 prompt
+        cdb_dict = state.get("character_db") or {}
+        character_db = CharacterDB.model_validate(cdb_dict) if cdb_dict else None
+
         writer(log_agent_input("image_agent", {
             "total_panels": total_panels,
-            "style_preset": state.get("style_preset", "manga"),
+            "style_preset": "black and white manga (hardcoded)",
             "backend_preference": "auto",
+            "character_db_available": character_db is not None,
+            "character_count": len(character_db.characters) if character_db else 0,
         }))
 
         panel_idx = 0
         for page in pages:
             for panel in page.panels:
                 panel_idx += 1
+                # 传入 character_db 以启用固定种子 + 角色外观 prompt
                 inputs = ImageInput(
                     panel_plan=panel,
-                    style_preset=state.get("style_preset", "manga"),
+                    character_db=character_db,
+                    style_preset="black and white manga",
                 )
                 try:
                     async for evt in self.image_agent.astream(inputs, ctx):

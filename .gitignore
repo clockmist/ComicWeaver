@@ -76,4 +76,4 @@ external/ComfyUI/temp/
 external/ComfyUI/.venv/
 
 
-cc-*.md
+cc/

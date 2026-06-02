@@ -226,6 +226,9 @@ class CharacterProfile(BaseModel):
     clip_embedding_id: str = ""
     style_preset: str = ""
     locked: bool = False
+    # 角色一致性：固定种子 + 特征 prompt（每次生成相同角色时复用）
+    seed: int = 0
+    appearance_prompt: str = ""
 
 
 class CharacterDB(BaseModel):
@@ -373,12 +376,13 @@ class SelfCheckResult(BaseModel):
 class ImageInput(BaseModel):
     panel_plan: PanelPlan
     reference_windows: dict[str, ReferenceWindow] = Field(default_factory=dict)
+    character_db: CharacterDB | None = None  # 角色数据库（用于读取固定种子和外观 prompt）
     style_preset: str = "manga"
     backend_preference: str = "auto"
     quality_target: Literal["draft", "standard", "high"] = "standard"
     seed: int | None = None
-    width: int = 768
-    height: int = 1024
+    width: int = 1216  # 新工作流 3:2 横版
+    height: int = 832
     feedback: ReviewFeedback | None = None
 
 

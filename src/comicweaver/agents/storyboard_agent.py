@@ -85,25 +85,57 @@ def _select_angle(scene: Scene) -> CameraAngle:
     return CameraAngle.EYE_LEVEL
 
 
-def _build_prompt(scene: Scene, shot: ShotSize, angle: CameraAngle, style: str) -> PromptPack:
-    chars = "、".join(scene.characters_present) or "no character"
+def _build_prompt(
+    scene: Scene,
+    shot: ShotSize,
+    angle: CameraAngle,
+    style: str,
+    char_appearance: str = "",
+    is_single: bool = True,
+) -> PromptPack:
+    """构建黑白漫画风格的 prompt 包。
+
+    硬编码黑白漫画标签，强制单色线稿风格。style 参数被覆盖为固定黑白风格。
+    单角色约束：positive prompt 仅包含 1girl/1boy，不允许多角色。
+    """
+    # 角色描述：仅单人
+    gender_tag = "1girl"  # 默认（后续可通过角色数据判断）
+    char_desc = f"{char_appearance}, " if char_appearance else ""
+
+    # 景别描述
+    shot_desc = shot.value.replace("_", " ")
+    angle_desc = angle.value.replace("_", " ")
+
+    # 正面提示词：严格黑白漫画模板
     pos = (
-        f"{style} style, "
-        f"{shot.value.replace('_', ' ')} shot, "
-        f"{angle.value.replace('_', ' ')}, "
-        f"characters: {chars}, "
-        f"location: {scene.location}, "
-        f"atmosphere: {scene.atmosphere}, "
-        f"emotion intensity {scene.emotion_intensity:.2f}, "
-        f"masterpiece, best quality, detailed"
+        f"masterpiece, high score, great score, absurdres, "
+        f"{gender_tag}, {char_desc}"
+        f"{shot_desc} shot, {angle_desc}, "
+        f"location: {scene.location}, atmosphere: {scene.atmosphere}, "
+        f"{scene.actions[0].description if scene.actions else 'standing'}, "
+        f"monochrome, greyscale, black and white manga style, "
+        f"screentone, halftone, ink drawing, "
+        f"clean lineart, high contrast, "
+        f"safe"
     )
-    neg = "low quality, blurry, distorted, multiple panels, comic page, watermark, text"
+
+    # 负面提示词：排除彩色/3D/写实风格
+    neg = (
+        "lowres, bad anatomy, bad hands, text, error, missing finger, "
+        "extra digits, fewer digits, cropped, worst quality, low quality, "
+        "low score, bad score, average score, signature, watermark, "
+        "username, blurry, "
+        "color, colored, multicolored, gradient, rainbow, "
+        "3d, realistic, photo, photograph, photorealistic, "
+        "nsfw, explicit"
+    )
+
     return PromptPack(
         positive_prompt=pos,
         negative_prompt=neg,
-        style_tags=[style, "manga"],
+        style_tags=["monochrome", "greyscale", "black and white manga", "screentone"],
         composition_tags=[shot.value, angle.value],
-        quality_tags=["masterpiece", "best quality"],
+        quality_tags=["masterpiece", "high score", "clean lineart"],
     )
 
 
@@ -195,6 +227,11 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
                     )
                     for di, d in enumerate(scene.dialogues)
                 ]
+                # 一图一角：每个 panel 最多分配 1 个角色
+                chars = scene.characters_present
+                char_for_panel = chars[panel_idx % len(chars)] if chars else ""
+                single_char_list = [char_for_panel] if char_for_panel else []
+
                 panels.append(
                     PanelPlan(
                         panel_id=panel_id,
@@ -207,7 +244,7 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
                         size_ratio=slot[2] * slot[3],
                         shot_size=shot,
                         camera_angle=angle,
-                        characters_in_panel=list(scene.characters_present),
+                        characters_in_panel=single_char_list,
                         primary_action=scene.actions[0].description if scene.actions else "",
                         setting=scene.location,
                         mood=scene.atmosphere,

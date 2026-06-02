@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections.abc import AsyncIterator
 
 from comicweaver.api import ApiBackendError, ComfyUIImageClient, ImageGenerationRequest
@@ -47,7 +48,23 @@ class CharacterAgent(BaseAgent[CharacterInput, CharacterOutput]):
         profiles: dict[str, CharacterProfile] = {}
 
         for draft in drafts:
-            ref_path = await self._reference_image_path(draft, context, inputs.style_preset)
+            # 固定种子：从 char_id 的 SHA256 前 16 位导出（保证每个角色种子唯一且可复现）
+            seed = int(hashlib.sha256(draft.char_id.encode()).hexdigest()[:16], 16) % (2**63)
+
+            # 提取视觉特征并构建角色外观 prompt
+            traits = _extract_traits_from_appearance(draft.appearance)
+            appearance_parts = []
+            if traits.hair:
+                appearance_parts.append(traits.hair)
+            if traits.eyes:
+                appearance_parts.append(traits.eyes)
+            if traits.clothing:
+                appearance_parts.append(traits.clothing)
+            appearance_prompt = ", ".join(appearance_parts) if appearance_parts else draft.appearance
+
+            ref_path = await self._reference_image_path(
+                draft, context, inputs.style_preset, seed, appearance_prompt,
+            )
             profiles[draft.char_id] = CharacterProfile(
                 char_id=draft.char_id,
                 name=draft.name,
@@ -55,12 +72,14 @@ class CharacterAgent(BaseAgent[CharacterInput, CharacterOutput]):
                     image_id=f"{draft.char_id}_base",
                     image_path=ref_path,
                     source="generated",
-                    generation_prompt=draft.appearance,
+                    generation_prompt=f"character design sheet, {appearance_prompt}",
                     confidence=0.85,
                 ),
-                visual_traits=_extract_traits_from_appearance(draft.appearance),
+                visual_traits=traits,
                 clip_embedding_id=f"emb_{draft.char_id}",
                 style_preset=inputs.style_preset or context.style_preset,
+                seed=seed,
+                appearance_prompt=appearance_prompt,
             )
 
         db = CharacterDB(
@@ -84,18 +103,36 @@ class CharacterAgent(BaseAgent[CharacterInput, CharacterOutput]):
         draft: CharacterDraft,
         context: AgentContext,
         style_preset: str | None,
+        seed: int = 0,
+        appearance_prompt: str = "",
     ) -> str:
         if self.config.image.is_available:
+            # 黑白漫画风格角色参考图 prompt（严格单色 + 线稿风格）
+            positive = (
+                f"masterpiece, high score, great score, absurdres, "
+                f"1girl, {appearance_prompt}, "
+                f"upper body, portrait, bust shot, "
+                f"looking at viewer, neutral expression, "
+                f"monochrome, greyscale, black and white manga style, "
+                f"screentone, ink drawing, clean lineart, high contrast, "
+                f"white background, safe"
+            )
+            negative = (
+                "lowres, bad anatomy, bad hands, text, error, missing finger, "
+                "extra digits, fewer digits, cropped, worst quality, low quality, "
+                "low score, bad score, average score, signature, watermark, "
+                "username, blurry, color, colored, multicolored, gradient, "
+                "rainbow, 3d, realistic, photo, photograph, photorealistic, "
+                "nsfw, explicit"
+            )
             request = ImageGenerationRequest(
                 project_id=context.project_id,
                 kind="character_reference",
-                prompt=(
-                    f"{style_preset or context.style_preset} character reference sheet, "
-                    f"name: {draft.name}, appearance: {draft.appearance}, "
-                    f"personality: {draft.personality}"
-                ),
-                width=768,
+                prompt=positive,
+                negative_prompt=negative,
+                width=1024,
                 height=1024,
+                seed=seed,
                 workflow_path=self.config.image.workflow_character_path,
                 metadata={"char_id": draft.char_id, "name": draft.name},
             )
@@ -178,14 +215,19 @@ class CharacterAgent(BaseAgent[CharacterInput, CharacterOutput]):
 
 
 def _extract_traits_from_appearance(appearance: str) -> VisualTraits:
-    """从外观描述中粗略提取关键特征。"""
-    parts = [p.strip() for p in appearance.replace(",", ",").split(",") if p.strip()]
+    """从外观描述中提取关键视觉特征（中英文双语支持）。"""
+    parts = [p.strip() for p in appearance.replace(",", ",").replace("，", ",").split(",") if p.strip()]
     traits = VisualTraits()
+    hair_keywords = ("发", "髮", "hair", "haired")
+    eye_keywords = ("眼", "瞳", "eye", "eyed")
+    cloth_keywords = ("衫", "服", "袍", "裙", "外套", "shirt", "coat", "jacket",
+                      "dress", "suit", "uniform", "robe", "cloak", "hoodie", "cape")
     for p in parts:
-        if any(k in p for k in ("发", "髮")):
+        p_lower = p.lower()
+        if any(k in p or k in p_lower for k in hair_keywords):
             traits.hair = p
-        elif any(k in p for k in ("眼", "瞳")):
+        elif any(k in p or k in p_lower for k in eye_keywords):
             traits.eyes = p
-        elif any(k in p for k in ("衫", "服", "袍", "裙", "外套")):
+        elif any(k in p or k in p_lower for k in cloth_keywords):
             traits.clothing = p
     return traits
