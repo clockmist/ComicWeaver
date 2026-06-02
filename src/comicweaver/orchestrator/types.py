@@ -1,9 +1,9 @@
-"""轻量级编排器 - 顺序工作流引擎,带审查节点与确认点。
+"""编排器类型定义 - 工作流事件、确认信号与交互模式判断。
 
 设计目标:
-1. 不强依赖 LangGraph(可在无该依赖时正常工作)
-2. 接口仿照 LangGraph 的 add_node/conditional_edges,便于未来替换
-3. 支持流式事件透传与暂停/恢复
+1. 与 LangGraph 工作流引擎配合,提供类型安全的流式事件与确认机制
+2. WorkflowEvent / WorkflowMessage / CheckpointSignal 是编排层与 UI 层之间的契约
+3. should_pause() 根据交互模式决定是否在关键节点暂停
 """
 from __future__ import annotations
 
