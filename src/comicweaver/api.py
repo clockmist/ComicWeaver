@@ -6,6 +6,7 @@ can be used by pointing base_url at their compatible endpoint.
 from __future__ import annotations
 
 import json
+import logging
 import time
 import urllib.error
 import urllib.parse
@@ -17,6 +18,21 @@ from pydantic import BaseModel, Field
 
 from .config import ImageConfig, LLMConfig
 from .storage.paths import project_dir
+
+logger = logging.getLogger("comicweaver.comfyui")
+if not logger.handlers:
+    # 配置 file handler 写入项目根目录下的 comfyui_requests.log
+    log_path = Path.cwd() / "comfyui_requests.log"
+    fh = logging.FileHandler(str(log_path), encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    logger.addHandler(fh)
+    logger.setLevel(logging.DEBUG)
+    # 防止向 root logger 重复传播
+    logger.propagate = False
 
 
 class ApiBackendError(RuntimeError):
@@ -85,42 +101,56 @@ class OpenAICompatibleLLMClient:
             ),
         ]
 
-        # 方法 1：带 response_format json_object；失败则不加
         last_error: Exception | None = None
-        for attempt in range(2):
+        # 外层：先尝试 json_object，失败后回退到无格式约束
+        for outer_attempt in range(2):
             req = ChatCompletionRequest(
                 model=self.config.model,
                 messages=messages,
                 temperature=self.config.temperature,
                 max_tokens=self.config.max_tokens,
             )
-            if attempt == 0:
+            if outer_attempt == 0:
                 req.response_format = {"type": "json_object"}
             else:
-                # 重试时去除 response_format 约束
                 req.response_format = None  # type: ignore[assignment]
 
+            # 内层：对 5xx / 网络错误做指数退避重试
             request_payload = req.model_dump(exclude_none=True)
-
-            try:
-                started = time.time()
-                raw = self._post_json(self._completion_url(), request_payload)
-                choices = raw.get("choices") or []
-                if not choices:
-                    raise ApiBackendError("LLM response does not contain choices")
-                message = choices[0].get("message") or {}
-                content = message.get("content") or ""
-                response = ChatCompletionResponse(
-                    content=content,
-                    raw=raw,
-                    latency_ms=int((time.time() - started) * 1000),
-                )
-                return response.json_content()
-            except ApiBackendError as exc:
-                last_error = exc
-                if attempt == 0:
-                    continue  # 用不带 json_object 的方式重试
-                raise
+            for inner_attempt in range(3):
+                try:
+                    started = time.time()
+                    raw = self._post_json(self._completion_url(), request_payload)
+                    choices = raw.get("choices") or []
+                    if not choices:
+                        raise ApiBackendError("LLM response does not contain choices")
+                    message = choices[0].get("message") or {}
+                    content = message.get("content") or ""
+                    response = ChatCompletionResponse(
+                        content=content,
+                        raw=raw,
+                        latency_ms=int((time.time() - started) * 1000),
+                    )
+                    return response.json_content()
+                except ApiBackendError as exc:
+                    last_error = exc
+                    error_str = str(exc).lower()
+                    # 仅对服务端/网络错误重试（4xx 客户端错误不重试）
+                    is_retryable = (
+                        "500" in error_str
+                        or "502" in error_str
+                        or "503" in error_str
+                        or "504" in error_str
+                        or "timeout" in error_str
+                        or "timed out" in error_str
+                        or "connection" in error_str
+                    )
+                    if is_retryable and inner_attempt < 2:
+                        delay = (2 ** inner_attempt) * 1.0
+                        time.sleep(delay)
+                        continue
+                    # 不可重试的错误，跳出内层
+                    break
 
         raise last_error or ApiBackendError("LLM call failed after retries")
 
@@ -171,6 +201,34 @@ class ImageGenerationResponse(BaseModel):
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
+def _write_generation_log(request: ImageGenerationRequest, workflow_path: Path) -> None:
+    """Write the exact seed + prompt to a generation log file in the project dir.
+
+    This makes it easy for the user to copy-paste parameters for manual ComfyUI testing.
+    """
+    out_dir = project_dir(request.project_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log_path = out_dir / "generation_log.txt"
+
+    panel_id = request.metadata.get("panel_id") or request.metadata.get("char_id") or "?"
+    ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
+    entry = (
+        f"{'=' * 80}\n"
+        f"[{ts}]  kind={request.kind}  id={panel_id}\n"
+        f"workflow: {workflow_path}\n"
+        f"seed:     {request.seed}\n"
+        f"size:     {request.width} x {request.height}\n"
+        f"{'─' * 80}\n"
+        f"POSITIVE:\n{request.prompt}\n"
+        f"{'─' * 80}\n"
+        f"NEGATIVE:\n{request.negative_prompt}\n"
+        f"{'=' * 80}\n\n"
+    )
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(entry)
+
+
 class ComfyUIImageClient:
     """Minimal ComfyUI API wrapper.
 
@@ -194,6 +252,21 @@ class ComfyUIImageClient:
         if not workflow_path.exists():
             raise ApiBackendError(f"Workflow file not found: {workflow_path}")
 
+        # --- 记录完整 ComfyUI 生图参数（文件日志）---
+        logger.info(
+            "ComfyUI 生图请求 [%s] seed=%s %s×%s\n"
+            "  workflow: %s\n"
+            "  positive: %s\n"
+            "  negative: %s\n"
+            "  metadata: %s",
+            request.kind, request.seed, request.width, request.height,
+            workflow_path, request.prompt, request.negative_prompt,
+            request.metadata,
+        )
+
+        # --- 写入项目目录下的生成参数日志（方便手动复现）---
+        _write_generation_log(request, workflow_path)
+
         workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
         if not isinstance(workflow, dict):
             raise ApiBackendError(f"Workflow file must contain a JSON object: {workflow_path}")
@@ -212,6 +285,12 @@ class ComfyUIImageClient:
         history = self._wait_for_history(prompt_id)
         image_info = self._first_output_image(history)
         image_path = self._download_image(image_info, request)
+
+        logger.info(
+            "ComfyUI 生图完成 [%s] seed=%s path=%s",
+            request.kind, request.seed, image_path,
+        )
+
         return ImageGenerationResponse(
             image_path=image_path,
             backend=self.config.provider,

@@ -226,6 +226,13 @@ class CharacterProfile(BaseModel):
     clip_embedding_id: str = ""
     style_preset: str = ""
     locked: bool = False
+    # 角色一致性：固定种子 + 特征 prompt（每次生成相同角色时复用）
+    seed: int = 0
+    appearance_prompt: str = ""
+    # Animagine-XL-4.0 角色数量标签（1girl / 1boy / 1other）
+    gender_tag: str = "1girl"
+    # LLM 生成的 Danbooru 风格角色 Tag（不含画风/质量 Tag）
+    core_tags: str = ""
 
 
 class CharacterDB(BaseModel):
@@ -310,6 +317,12 @@ class PanelPlan(BaseModel):
     prompt_pack: PromptPack = Field(default_factory=PromptPack)
     dialogues_in_panel: list[Dialogue] = Field(default_factory=list)
     speech_bubble_hints: list[BubbleHint] = Field(default_factory=list)
+    # LLM 生成的分镜细节（StoryboardAgent 通过 LLM 设计）
+    pose_hint: str = ""          # 角色身体姿势描述
+    expression: str = ""         # 角色面部表情
+    scene_lighting: str = ""     # 场景光照描述
+    weather: str = ""            # 天气
+    time_of_day: str = ""        # 时间段
 
 
 class PageLayout(BaseModel):
@@ -374,11 +387,12 @@ class SelfCheckResult(BaseModel):
 class ImageInput(BaseModel):
     panel_plan: PanelPlan
     reference_windows: dict[str, ReferenceWindow] = Field(default_factory=dict)
+    character_db: CharacterDB | None = None  # 角色数据库（用于读取固定种子和外观 prompt）
     style_preset: str = "manga"
     backend_preference: str = "auto"
     quality_target: Literal["draft", "standard", "high"] = "standard"
     seed: int | None = None
-    width: int = 768
+    width: int = 1024
     height: int = 1024
     feedback: ReviewFeedback | None = None
 

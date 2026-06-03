@@ -26,9 +26,9 @@ from comicweaver.core import (
 )
 
 _MOCK_CHARACTERS = [
-    ("林染", "protagonist", "黑色短发,蓝色眼睛,白衬衫黑外套", "好奇心强,坚定"),
-    ("陈夜", "antagonist", "灰色长发,黄色瞳孔,黑色长袍", "神秘,深谋远虑"),
-    ("苏白", "supporting", "金色卷发,绿眼,粉色连衣裙", "活泼,善良"),
+    ("林染", "protagonist", "男性,短发凌乱,丹凤眼,宽松连帽衫配修身长裤,瘦高身材"),
+    ("陈夜", "antagonist", "男性,灰色长直发,细长眼,修身长袍,高瘦身形"),
+    ("苏白", "supporting", "女性,波浪短发,大圆眼,荷叶边衬衫配百褶裙,娇小身材"),
 ]
 
 _MOCK_LOCATIONS = ["雨夜城市街道", "废弃工厂", "霓虹咖啡馆", "天台",
@@ -58,13 +58,24 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
         client = OpenAICompatibleLLMClient(self.config.llm)
 
         system_prompt = (
-            "You are a professional comic script writer for ComicWeaver, a multi-agent "
-            "comic creation system. Your task is to generate a structured comic script "
-            "from a user's story idea.\n\n"
-            "CRITICAL RULES:\n"
-            "1. Return a single JSON object matching this EXACT structure:\n"
+            "You are a professional comic script writer for ComicWeaver, a SINGLE-CHARACTER-PER-PANEL "
+            "black-and-white manga system. Every scene features EXACTLY ONE character. Your JSON "
+            "output will be REJECTED if any scene contains more than 1 character in characters_present.\n\n"
+
+            "=== RULE #1 (MOST IMPORTANT — VIOLATION = REJECTION) ===\n"
+            'Every "characters_present" array MUST contain EXACTLY ONE character ID. '
+            "ONE and ONLY ONE. Never two. Never three. ONE.\n"
+            '  CORRECT: "characters_present": ["char_000"]\n'
+            '  CORRECT: "characters_present": ["char_001"]\n'
+            '  WRONG:   "characters_present": ["char_000", "char_001"]  <-- WILL BE REJECTED\n'
+            '  WRONG:   "characters_present": []                        <-- WILL BE REJECTED\n'
+            "If two characters interact, put them in SEPARATE scenes. "
+            "Dialogue/text can reference other characters even when only one is visible.\n\n"
+
+            "=== OTHER RULES ===\n"
+            "2. Return a single JSON object matching this EXACT structure:\n"
             '{\n'
-            '  "title": "A compelling title for the comic (DO NOT leave as Untitled)",\n'
+            '  "title": "A compelling title for the comic",\n'
             '  "summary": "2-3 sentence summary of the story",\n'
             '  "genre": ["action", "mystery"],\n'
             '  "characters": [\n'
@@ -72,8 +83,12 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
             '      "char_id": "char_000",\n'
             '      "name": "Character Name",\n'
             '      "role": "protagonist",\n'
-            '      "appearance": "Detailed visual description (hair, eyes, clothing, build)",\n'
-            '      "personality": "Key personality traits",\n'
+            '      "appearance": "Start with gender (male/female), then describe hair '
+            '(length, style, texture — NOT color except black/white/grey for hair), '
+            'eyes (shape and color allowed), clothing (style, fit, layers, texture — '
+            'NOT color), build. Describe TEXTURE, SHAPE, PATTERN, STYLE, LENGTH, FIT — '
+            'NOT colors. Example: Male, short spiky hair, narrow sharp grey eyes, '
+            'loose hoodie with layered collar, slim athletic build.",\n'
             '      "first_appearance_scene": 0\n'
             '    }\n'
             '  ],\n'
@@ -83,10 +98,10 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
             '      "order": 0,\n'
             '      "location": "Specific location name",\n'
             '      "time_of_day": "morning/afternoon/evening/night",\n'
-            '      "atmosphere": "Mood description (e.g., tense, peaceful, melancholic)",\n'
+            '      "atmosphere": "Mood (e.g., tense, peaceful)",\n'
             '      "characters_present": ["char_000"],\n'
             '      "actions": [{"actor": "char_000", "description": "Action description"}],\n'
-            '      "dialogues": [{"speaker": "char_000", "text": "Dialogue line", "tone": "neutral"}],\n'
+            '      "dialogues": [{"speaker": "char_000", "text": "Dialogue", "tone": "neutral"}],\n'
             '      "narration": null,\n'
             '      "emotion_intensity": 0.5,\n'
             '      "panel_hint": 2\n'
@@ -101,16 +116,20 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
             '    "pacing": "varied"\n'
             '  }\n'
             '}\n\n'
-            "2. Use char_id values like char_000, char_001, char_002.\n"
-            "3. Use scene_id values like scene_000, scene_001, etc.\n"
-            "4. role must be one of: protagonist, antagonist, supporting, extra.\n"
-            "5. emotion_intensity ranges from 0.0 (calm) to 1.0 (intense climax).\n"
-            "6. emotion_curve must have ONE value per scene, in scene order.\n"
-            "7. narrative_structure arrays contain scene INDICES (order field values).\n"
-            "8. Each scene should have at least 1 action and 1 dialogue.\n"
-            "9. Make each scene VISUALLY DESCRIPTIVE for comic panel illustration.\n"
-            "10. Title must be creative and specific, never 'Untitled'.\n"
-            "11. Output ONLY the JSON object, no markdown wrapping, no extra text."
+            "3. char_id format: char_000, char_001, char_002. "
+            "scene_id format: scene_000, scene_001, etc.\n"
+            "4. role must be: protagonist, antagonist, supporting, extra.\n"
+            "5. emotion_intensity: 0.0 (calm) to 1.0 (climax).\n"
+            "6. emotion_curve: ONE float per scene, in scene order.\n"
+            "7. narrative_structure: arrays contain scene INDICES (order field values).\n"
+            "8. Each scene: at least 1 action + 1 dialogue.\n"
+            "9. Title must be creative, never 'Untitled'.\n"
+            "10. Output ONLY the JSON object, no markdown, no extra text.\n\n"
+
+            "=== REMINDER: characters_present ===\n"
+            "I repeat Rule #1 because it is the most common cause of rejection:\n"
+            'characters_present = ["ONE_CHAR_ID"] — exactly 1 element, always.\n'
+            'Never ["char_000", "char_001"]. Never []. Never more than 1.\n'
         )
 
         target_pages = inputs.target_pages
@@ -122,13 +141,16 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
             f'"{inputs.raw_text}"\n\n'
             f"Parameters:\n"
             f"- Target pages: {target_pages}\n"
-            f"- Target scenes: {target_scenes} (approximately {target_pages} pages × 2-3 panels each)\n"
+            f"- Target scenes: {target_scenes}\n"
             f"- Style: {inputs.style_hint or 'manga'}\n"
             f"- Language: {inputs.language}\n"
             f"- Character count: 2-3\n\n"
-            f"Create a complete story arc with clear setup, rising action, climax, and resolution. "
-            f"Distribute the {target_scenes} scenes evenly across the narrative structure. "
-            f"Each scene must have vivid visual descriptions that a comic artist can draw."
+            f"CRITICAL CONSTRAINT (your output will be REJECTED if violated):\n"
+            f"  Every scene MUST have EXACTLY ONE character in characters_present.\n"
+            f"  This is a single-character-per-panel system.\n"
+            f"  If a scene involves two characters meeting or interacting,\n"
+            f"  split them into SEPARATE SCENES — each scene shows only one of them.\n\n"
+            f"Create a complete story arc with clear setup, rising action, climax, and resolution."
         )
 
         payload = {"user_message": user_message}
@@ -198,10 +220,9 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
                 name=name,
                 role=role,  # type: ignore[arg-type]
                 appearance=appearance,
-                personality=personality,
                 first_appearance_scene=0 if i == 0 else i,
             )
-            for i, (name, role, appearance, personality) in enumerate(
+            for i, (name, role, appearance) in enumerate(
                 _MOCK_CHARACTERS[:n_chars]
             )
         ]
@@ -210,7 +231,8 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
         n_scenes = max(4, inputs.target_pages * 2)
         scenes: list[Scene] = []
         for i in range(n_scenes):
-            present = [c.char_id for c in characters[: 1 + (i % len(characters))]]
+            # 每个场景仅 1 个角色（黑白漫画单角色分镜系统）
+            present = [characters[i % len(characters)].char_id]
             scenes.append(
                 Scene(
                     scene_id=f"scene_{i:03d}",

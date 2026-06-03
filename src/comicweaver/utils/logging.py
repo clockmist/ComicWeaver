@@ -187,6 +187,46 @@ def log_checkpoint(checkpoint_id: str, decision: str) -> DevLogEntry:
     )
 
 
+def log_comfyui_request(agent: str, kind: str, prompt: str,
+                       negative_prompt: str, seed: int, width: int,
+                       height: int, workflow_path: str,
+                       metadata: dict | None = None) -> DevLogEntry:
+    """记录发送给 ComfyUI 的完整生图参数。"""
+    return DevLogEntry(
+        level=DevLogLevel.INFO,
+        category=DevLogCategory.AGENT_OUTPUT,
+        agent=agent,
+        message=f"🎨 ComfyUI 生图请求 [{kind}] seed={seed} {width}×{height}",
+        data={
+            "kind": kind,
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "seed": seed,
+            "width": width,
+            "height": height,
+            "workflow_path": workflow_path,
+            "metadata": metadata or {},
+        },
+    )
+
+
+def log_comfyui_response(agent: str, kind: str, image_path: str,
+                         backend: str, seed: int) -> DevLogEntry:
+    """记录 ComfyUI 生图结果。"""
+    return DevLogEntry(
+        level=DevLogLevel.INFO,
+        category=DevLogCategory.AGENT_OUTPUT,
+        agent=agent,
+        message=f"✅ ComfyUI 生图完成 [{kind}] backend={backend} seed={seed}",
+        data={
+            "kind": kind,
+            "image_path": image_path,
+            "backend": backend,
+            "seed": seed,
+        },
+    )
+
+
 def log_workflow_event(event: str, detail: str = "") -> DevLogEntry:
     """工作流级别事件日志。"""
     return DevLogEntry(
@@ -243,6 +283,10 @@ def summarize_character_output(output: dict) -> dict:
                 "reference_source": cp.get("base_reference", {}).get("source", "?"),
                 "reference_confidence": cp.get("base_reference", {}).get("confidence", 0),
                 "archive_size": len(cp.get("archive", [])),
+                "seed": cp.get("seed", 0),
+                "appearance_prompt": cp.get("appearance_prompt", ""),
+                "gender_tag": cp.get("gender_tag", "1girl"),
+                "core_tags": cp.get("core_tags", ""),
             }
             for cid, cp in characters.items()
         },
@@ -264,6 +308,10 @@ def summarize_storyboard_output(output: dict) -> dict:
                 "characters": pn.get("characters_in_panel", []),
                 "action": (pn.get("primary_action", "") or "")[:80],
                 "emotion": pn.get("emotion_intensity", 0),
+                "pose_hint": pn.get("pose_hint", ""),
+                "expression": pn.get("expression", ""),
+                "scene_lighting": pn.get("scene_lighting", ""),
+                "weather": pn.get("weather", ""),
                 "prompt_preview": (pn.get("prompt_pack", {}).get("positive_prompt", "") or "")[:120],
             })
     return {
@@ -279,6 +327,8 @@ def summarize_image_output(output: dict) -> dict:
     """从 ImageOutput 构建可读摘要。"""
     pi = output.get("panel_image") or {}
     sc = output.get("self_check") or {}
+    prompt_full = pi.get("prompt_used", "") or ""
+    negative_full = pi.get("negative_prompt_used", "") or ""
     return {
         "panel_id": pi.get("panel_id", "?"),
         "image_path": pi.get("image_path", ""),
@@ -289,7 +339,10 @@ def summarize_image_output(output: dict) -> dict:
         "steps": pi.get("steps", 0),
         "cfg_scale": pi.get("cfg_scale", 0),
         "generation_time_ms": pi.get("generation_time_ms", 0),
-        "prompt_preview": (pi.get("prompt_used", "") or "")[:150],
+        "prompt_full": prompt_full,
+        "prompt_preview": prompt_full[:200],
+        "negative_prompt_full": negative_full,
+        "negative_prompt_preview": negative_full[:150],
         "characters_present": pi.get("characters_present", []),
         "fallback_chain": output.get("fallback_chain", []),
         "self_check": {

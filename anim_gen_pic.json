@@ -1,0 +1,107 @@
+{
+  "3": {
+    "inputs": {
+      "seed": 604935863,
+      "steps": 25,
+      "cfg": 5,
+      "sampler_name": "euler_ancestral",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "4",
+        0
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "latent_image": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "🎲 KSampler (CFG=5, Steps=25, Euler a)"
+    }
+  },
+  "4": {
+    "inputs": {
+      "ckpt_name": "animagine-xl-4.0-opt.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Checkpoint加载器（简易）"
+    }
+  },
+  "5": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "📐 分辨率: 1216x832 (3:2 横版)"
+    }
+  },
+  "6": {
+    "inputs": {
+      "text": "masterpiece, best quality, newest, safe, female, feminine, 1girl, solo, young_adult, long black hair, round eyes, casual dress, slender build, medium, eye level, walking forward, standing, looking ahead, expectant, path, trees, soft, monochrome, greyscale, black and white manga style, screentone, halftone, ink drawing, clean lineart, high contrast",
+      "clip": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "🟢 正面提示词 (分镜2: 走廊中景)"
+    }
+  },
+  "7": {
+    "inputs": {
+      "text": "lowres, worst quality, bad quality, displeasing, low resolution, bad anatomy, bad hands, bad fingers, extra digits, fewer digits, cropped, signature, watermark, username, blurry, text, error, color, colored, multicolored, gradient, rainbow, 3d, realistic, photo, photograph, photorealistic, nsfw, explicit",
+      "clip": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "🔴 负面提示词"
+    }
+  },
+  "8": {
+    "inputs": {
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "ComicWeaver_BW_Panel2_Hallway",
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  }
+}
