@@ -22,9 +22,12 @@ from .html_widgets import (
     render_agent_outputs,
     render_character_profiles,
     render_checkpoint,
+    render_comparison_view,
     render_dev_log,
     render_emotion_curve,
+    render_live_panel_preview,
     render_log,
+    render_page_reader,
     render_panel_images_gallery,
     render_performance_summary,
     render_review_full_detail,
@@ -58,6 +61,7 @@ class Session:
         # 新增：Agent 输出和开发者日志收集
         self.agent_outputs: dict[str, list[dict]] = {}  # agent_id -> [output dicts]
         self.dev_log: list[dict] = []                    # DevLogEntry dicts
+        self.panel_images_preview: list[dict] = []       # 实时面板预览
         # asyncio 资源
         self._task: asyncio.Task | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -73,6 +77,7 @@ class Session:
         self.workflow = None
         self.agent_outputs = {}
         self.dev_log = []
+        self.panel_images_preview = []
         self._task = None
         self._loop = None
 
@@ -190,6 +195,9 @@ async def _consume_workflow(session: Session) -> None:
                             "output": content,
                             "timestamp": msg.timestamp,
                         })
+                        # 实时面板预览：image_agent 完成时收集图像
+                        if agent_name == "image_agent" and "panel_image" in content:
+                            session.panel_images_preview.append(content["panel_image"])
                         # 日志中显示摘要
                         keys = list(content.keys())
                         summary = f"✓ 完成 · 输出 {len(content)} 个字段: {', '.join(keys[:8])}"
@@ -251,6 +259,7 @@ def _ensure_loop(session: Session) -> asyncio.AbstractEventLoop:
 
 def create_project(
     user_input: str,
+    project_name: str,
     creation_mode: str,
     style_preset: str,
     interaction_mode: str,
@@ -262,6 +271,7 @@ def create_project(
     SESSION.reset()
     SESSION.state = make_initial_state(
         user_input=user_input,
+        title=project_name.strip(),
         creation_mode=creation_mode,
         style_preset=style_preset,
         interaction_mode=interaction_mode,
@@ -269,9 +279,10 @@ def create_project(
     )
 
     project_id = SESSION.state["project_id"]
+    proj_title = SESSION.state.get("title", project_id)
     return (
-        f"✅ 项目已创建: {project_id}",
-        f"项目ID: {project_id}\n模式: {creation_mode} / {interaction_mode}\n"
+        f"✅ 项目已创建: {proj_title} ({project_id})",
+        f"项目名称: {proj_title}\n项目ID: {project_id}\n模式: {creation_mode} / {interaction_mode}\n"
         f"目标页数: {target_pages}\n风格: {style_preset}\n"
         f"剧本: {user_input[:60]}{'...' if len(user_input) > 60 else ''}",
     )
@@ -286,14 +297,22 @@ def start_workflow() -> Iterator[tuple]:
             render_log([]),
             render_checkpoint(None),
             render_score_bars({}),
+            render_live_panel_preview([]),
         )
         return
 
-    SESSION.workflow = ComicWorkflow()
+    # 检测是否为恢复：若已有 workflow 且来自已保存项目，则复用
+    current_phase = SESSION.state.get("current_phase", "init")
+    if SESSION.workflow is None:
+        if current_phase not in ("init",):
+            SESSION.workflow = ComicWorkflow(resume_phase=current_phase)
+        else:
+            SESSION.workflow = ComicWorkflow()
     SESSION.event_log = []
     SESSION.done_agents = []
     SESSION.workflow_done = False
     SESSION.last_checkpoint = None
+    SESSION.panel_images_preview = []
 
     loop = _ensure_loop(SESSION)
     SESSION._task = asyncio.run_coroutine_threadsafe(
@@ -307,6 +326,7 @@ def start_workflow() -> Iterator[tuple]:
         render_log(SESSION.event_log),
         render_checkpoint(SESSION.last_checkpoint),
         render_score_bars(SESSION.review_scores),
+        render_live_panel_preview(SESSION.panel_images_preview),
     )
 
     while True:
@@ -325,6 +345,7 @@ def start_workflow() -> Iterator[tuple]:
             render_log(SESSION.event_log),
             render_checkpoint(SESSION.last_checkpoint),
             render_score_bars(SESSION.review_scores),
+            render_live_panel_preview(SESSION.panel_images_preview),
         )
 
         if SESSION.workflow_done or SESSION.error:
@@ -343,6 +364,7 @@ def respond_checkpoint(decision: str) -> Iterator[tuple]:
             render_log(SESSION.event_log),
             render_checkpoint(None),
             render_score_bars(SESSION.review_scores),
+            render_live_panel_preview(SESSION.panel_images_preview),
         )
         return
 
@@ -361,6 +383,7 @@ def respond_checkpoint(decision: str) -> Iterator[tuple]:
         render_log(SESSION.event_log),
         render_checkpoint(None),
         render_score_bars(SESSION.review_scores),
+        render_live_panel_preview(SESSION.panel_images_preview),
     )
 
     while True:
@@ -379,22 +402,28 @@ def respond_checkpoint(decision: str) -> Iterator[tuple]:
             render_log(SESSION.event_log),
             render_checkpoint(SESSION.last_checkpoint),
             render_score_bars(SESSION.review_scores),
+            render_live_panel_preview(SESSION.panel_images_preview),
         )
 
         if SESSION.workflow_done or SESSION.error or SESSION.last_checkpoint:
             break
 
 
-def load_results() -> tuple[str, str, str, str, list]:
+def load_results(page_idx: int = 0, show_bubbles: bool = False) -> tuple[str, str, str, str, str, str, list]:
     if SESSION.state is None:
         empty = '<div style="color:#64748b;padding:12px;">请先创建项目并运行工作流</div>'
-        return empty, empty, empty, empty, []
+        return empty, empty, empty, empty, empty, empty, []
 
     script = SESSION.state.get("structured_script", {}) or {}
     curve = SESSION.state.get("emotion_curve", []) or []
     plan = SESSION.state.get("storyboard_plan", []) or []
     reviews = SESSION.state.get("review_results", []) or []
     final_pages = SESSION.state.get("final_pages", []) or []
+
+    # 页面阅读器
+    page_reader_html = render_page_reader(final_pages, page_idx, show_bubbles)
+    # 分镜对比
+    comparison_html = render_comparison_view(plan, final_pages)
 
     page_gallery = []
     for p in final_pages:
@@ -407,8 +436,34 @@ def load_results() -> tuple[str, str, str, str, list]:
         render_emotion_curve(curve),
         render_storyboard_preview(plan),
         render_review_history(reviews),
+        page_reader_html,
+        comparison_html,
         page_gallery,
     )
+
+
+def navigate_page(direction: str, page_idx: int, show_bubbles: bool) -> tuple[str, int]:
+    """页面导航回调。"""
+    final_pages = SESSION.state.get("final_pages", []) if SESSION.state else []
+    total = len(final_pages)
+    if direction == "prev":
+        page_idx = max(0, page_idx - 1)
+    elif direction == "next":
+        page_idx = min(total - 1, page_idx + 1)
+    return render_page_reader(final_pages, page_idx, show_bubbles), page_idx
+
+
+def get_download_files() -> list[str]:
+    """获取所有最终页面的文件路径用于下载。"""
+    if SESSION.state is None:
+        return []
+    pages = SESSION.state.get("final_pages", [])
+    paths = []
+    for p in pages:
+        path = p.get("image_path", "")
+        if path and os.path.exists(path):
+            paths.append(path)
+    return paths
 
 
 def load_agent_outputs_tab() -> tuple[str, str, str, str, str]:
@@ -479,6 +534,76 @@ def load_dev_log_tab(filter_category: str = "all",
 
 
 # ============================================================================
+# 项目管理回调
+# ============================================================================
+
+
+def list_projects_ui() -> list[list]:
+    """列出所有已保存的项目，返回 Dataframe 行数据。"""
+    from comicweaver.storage import list_projects as storage_list_projects
+    projects = storage_list_projects()
+    rows: list[list] = []
+    for p in projects:
+        phase = p.state.get("current_phase", "init") if p.state else "init"
+        rows.append([
+            p.project_id,
+            p.title,
+            _format_timestamp(p.updated_at),
+            phase,
+        ])
+    return rows
+
+
+def _format_timestamp(ts: float) -> str:
+    """格式化 Unix 时间戳为可读字符串。"""
+    import datetime
+    dt = datetime.datetime.fromtimestamp(ts)
+    return dt.strftime("%Y-%m-%d %H:%M")
+
+
+def open_project_callback(selected_row: list) -> tuple[str, str, str, str, str, str]:
+    """打开选中的已保存项目。"""
+    from comicweaver.storage import load_project, project_to_state
+
+    if not selected_row or not selected_row[0]:
+        empty = '<div style="color:#64748b;padding:12px;">请先在项目列表中选择一个项目</div>'
+        return "❌ 未选择项目", empty, empty, empty, empty, empty
+
+    project_id = str(selected_row[0])
+    project = load_project(project_id)
+    if project is None:
+        empty = '<div style="color:#64748b;padding:12px;">项目不存在</div>'
+        return f"❌ 项目 {project_id} 不存在", empty, empty, empty, empty
+
+    state = project_to_state(project)
+    SESSION.reset()
+    SESSION.state = state
+    SESSION.workflow = ComicWorkflow.from_saved_project(project_id)
+
+    return (
+        f"✅ 已加载项目: {project.title} ({project_id})",
+        render_agent_grid(),
+        render_log([]),
+        render_checkpoint(None),
+        render_score_bars({}),
+        render_live_panel_preview([]),
+    )
+
+
+def save_current_project() -> str:
+    """手动保存当前项目。"""
+    if SESSION.state is None:
+        return "❌ 没有可保存的项目，请先创建项目"
+    from comicweaver.storage import save_project, state_to_project
+    try:
+        proj = state_to_project(SESSION.state)
+        save_project(proj)
+        return f"✅ 项目已保存: {proj.title} ({proj.project_id})"
+    except Exception as exc:
+        return f"❌ 保存失败: {exc}"
+
+
+# ============================================================================
 # UI 构建
 # ============================================================================
 
@@ -507,6 +632,11 @@ def build_ui() -> gr.Blocks:
                                         "• 详细模式: 提供分场景的详细描述\n"
                                         "• 改编模式: 粘贴小说原文",
                             lines=6,
+                        )
+                        project_name = gr.Textbox(
+                            label="项目名称（可选）",
+                            placeholder="留空则自动从剧本截取...",
+                            value="",
                         )
                         gr.Markdown("### 2. 配置创作参数")
                         with gr.Row():
@@ -565,7 +695,7 @@ def build_ui() -> gr.Blocks:
 
                 create_btn.click(
                     create_project,
-                    inputs=[user_input, creation_mode, style_preset,
+                    inputs=[user_input, project_name, creation_mode, style_preset,
                             interaction_mode, target_pages],
                     outputs=[create_status, project_info],
                 )
@@ -598,6 +728,9 @@ def build_ui() -> gr.Blocks:
                         gr.Markdown("#### 最近一次审查评分")
                         score_html = gr.HTML(render_score_bars({}))
 
+                gr.Markdown("#### 实时面板预览")
+                panel_preview_html = gr.HTML(render_live_panel_preview([]))
+
                 gr.Markdown("#### 用户确认 (半自动模式)")
                 checkpoint_html = gr.HTML(render_checkpoint(None))
 
@@ -610,31 +743,47 @@ def build_ui() -> gr.Blocks:
                     skip_btn = gr.Button("⏭ 跳过此阶段",
                                             elem_classes="cw-btn-secondary")
 
+                with gr.Row():
+                    save_btn = gr.Button("💾 保存当前项目",
+                                         elem_classes="cw-btn-secondary")
+                    save_status = gr.Textbox(
+                        label="", interactive=False, scale=3,
+                    )
+
                 start_btn.click(
                     start_workflow,
                     outputs=[workflow_status, agent_grid_html, log_html,
-                              checkpoint_html, score_html],
+                              checkpoint_html, score_html, panel_preview_html],
                 )
                 accept_btn.click(
                     lambda: (yield from respond_checkpoint("accept")),
                     outputs=[workflow_status, agent_grid_html, log_html,
-                              checkpoint_html, score_html],
+                              checkpoint_html, score_html, panel_preview_html],
                 )
                 regen_btn.click(
                     lambda: (yield from respond_checkpoint("regenerate")),
                     outputs=[workflow_status, agent_grid_html, log_html,
-                              checkpoint_html, score_html],
+                              checkpoint_html, score_html, panel_preview_html],
                 )
                 skip_btn.click(
                     lambda: (yield from respond_checkpoint("skip")),
                     outputs=[workflow_status, agent_grid_html, log_html,
-                              checkpoint_html, score_html],
+                              checkpoint_html, score_html, panel_preview_html],
+                )
+                save_btn.click(
+                    save_current_project,
+                    outputs=[save_status],
                 )
 
             # ---- Tab 3: 结果浏览（增强）----
             with gr.Tab("📖 结果浏览"):
                 gr.Markdown("### 查看各阶段产出")
-                load_btn = gr.Button("🔄 刷新结果", variant="primary")
+                with gr.Row():
+                    load_btn = gr.Button("🔄 刷新结果", variant="primary")
+                    download_btn = gr.DownloadButton(
+                        "📥 下载所有页面",
+                        variant="secondary",
+                    )
 
                 with gr.Accordion("📝 剧本结构", open=True):
                     script_html = gr.HTML()
@@ -642,9 +791,30 @@ def build_ui() -> gr.Blocks:
                     curve_html = gr.HTML()
                 with gr.Accordion("🎬 分镜规划", open=False):
                     storyboard_html = gr.HTML()
+
+                # -- 逐页阅读器 --
+                with gr.Accordion("🎨 漫画页面阅读器", open=True):
+                    page_state = gr.State(0)
+                    bubble_toggle = gr.State(False)
+
+                    with gr.Row():
+                        prev_btn = gr.Button("◀ 上一页", scale=1)
+                        next_btn = gr.Button("下一页 ▶", scale=1)
+                        bubble_checkbox = gr.Checkbox(
+                            label="显示对话气泡边界",
+                            value=False,
+                            scale=2,
+                        )
+
+                    page_reader_html = gr.HTML(render_page_reader([], 0))
+
+                with gr.Accordion("🔄 分镜 vs 成品对比", open=False):
+                    comparison_html = gr.HTML()
+
                 with gr.Accordion("✅ 审查历史", open=False):
                     review_html = gr.HTML()
-                with gr.Accordion("🎨 最终漫画页面", open=True):
+
+                with gr.Accordion("🎨 页面缩略图", open=False):
                     page_gallery = gr.Gallery(
                         label="漫画页面",
                         columns=2,
@@ -654,8 +824,31 @@ def build_ui() -> gr.Blocks:
 
                 load_btn.click(
                     load_results,
+                    inputs=[page_state, bubble_toggle],
                     outputs=[script_html, curve_html, storyboard_html,
-                              review_html, page_gallery],
+                              review_html, page_reader_html, comparison_html,
+                              page_gallery],
+                )
+                prev_btn.click(
+                    lambda s, b: navigate_page("prev", s, b),
+                    inputs=[page_state, bubble_toggle],
+                    outputs=[page_reader_html, page_state],
+                )
+                next_btn.click(
+                    lambda s, b: navigate_page("next", s, b),
+                    inputs=[page_state, bubble_toggle],
+                    outputs=[page_reader_html, page_state],
+                )
+                bubble_checkbox.change(
+                    lambda s, b: (render_page_reader(
+                        SESSION.state.get("final_pages", []) if SESSION.state else [],
+                        s, b), b),
+                    inputs=[page_state, bubble_checkbox],
+                    outputs=[page_reader_html, bubble_toggle],
+                )
+                download_btn.click(
+                    get_download_files,
+                    outputs=[download_btn],
                 )
 
             # ---- Tab 4: Agent 输出详情 ----
@@ -728,6 +921,45 @@ def build_ui() -> gr.Blocks:
                     load_dev_log_tab,
                     inputs=[filter_category, filter_level],
                     outputs=[dev_stats_html, dev_log_html, perf_summary_html],
+                )
+
+            # ---- Tab 7: 项目管理 ----
+            with gr.Tab("📂 项目管理"):
+                gr.Markdown("### 已保存的项目")
+
+                with gr.Row():
+                    refresh_projects_btn = gr.Button("🔄 刷新项目列表", variant="primary")
+                    open_selected_btn = gr.Button("📂 打开选中项目", variant="primary")
+
+                project_table = gr.Dataframe(
+                    headers=["项目ID", "名称", "更新时间", "当前阶段"],
+                    datatype=["str", "str", "str", "str"],
+                    label="项目列表",
+                    interactive=False,
+                    row_count=(5, "dynamic"),
+                )
+                project_select = gr.State([])
+
+                open_project_status = gr.Textbox(
+                    label="操作状态", interactive=False,
+                    elem_classes="cw-card",
+                )
+
+                # 当打开项目后，同步刷新结果视图的占位组件
+                open_script_html = gr.HTML(visible=False)
+                open_curve_html = gr.HTML(visible=False)
+                open_storyboard_html = gr.HTML(visible=False)
+                open_review_html = gr.HTML(visible=False)
+
+                refresh_projects_btn.click(
+                    list_projects_ui,
+                    outputs=[project_table],
+                )
+                open_selected_btn.click(
+                    open_project_callback,
+                    inputs=[project_table],
+                    outputs=[open_project_status, agent_grid_html, log_html,
+                             checkpoint_html, score_html, panel_preview_html],
                 )
 
             # ---- Tab 6: 关于 ----

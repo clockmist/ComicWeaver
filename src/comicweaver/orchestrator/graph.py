@@ -41,6 +41,7 @@ from comicweaver.core import (
     StoryboardInput,
     StreamEventType,
 )
+from comicweaver.storage import save_project, state_to_project
 from comicweaver.utils.logging import (
     log_agent_error,
     log_agent_input,
@@ -58,7 +59,13 @@ from comicweaver.utils.logging import (
     summarize_storyboard_output,
 )
 
-from .types import WorkflowEvent, WorkflowMessage
+from .types import (
+    CheckpointSignal,
+    KEY_CHECKPOINTS,
+    WorkflowEvent,
+    WorkflowMessage,
+    should_pause,
+)
 
 class ComicWorkflow:
     """漫画创作工作流执行器（基于 LangGraph StateGraph）。
@@ -70,15 +77,22 @@ class ComicWorkflow:
 
         # 用户响应确认点
         wf.respond("accept")
+
+    恢复已保存项目:
+        wf = ComicWorkflow.from_saved_project(project_id)
+        async for msg in wf.arun(wf._saved_state):
+            ...
     """
 
-    def __init__(self) -> None:
+    def __init__(self, resume_phase: str | None = None) -> None:
         self.config = load_config()
         self.script_agent = ScriptAgent()
         self.character_agent = CharacterAgent()
         self.storyboard_agent = StoryboardAgent()
         self.image_agent = ImageAgent()
         self.layout_agent = LayoutAgent()
+
+        self._resume_phase = resume_phase
 
         # 构建并编译 LangGraph 图
         self._graph = self._build_graph()
@@ -88,6 +102,14 @@ class ComicWorkflow:
         self._response_queue: asyncio.Queue | None = None
         self._loop_for_response: asyncio.AbstractEventLoop | None = None
         self._current_config: dict | None = None
+
+        # Checkpoint pause/resume
+        self._response_event: asyncio.Event | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._last_decision: str | None = None
+
+        # 跨会话恢复：存储已加载的 state
+        self._saved_state: ComicState | None = None
 
     def _ensure_queue(self) -> asyncio.Queue:
         if self._response_queue is None:
@@ -108,13 +130,26 @@ class ComicWorkflow:
         builder.add_node("image", self._node_image)
         builder.add_node("layout", self._node_layout)
 
-        # -- 边：START → script → character → storyboard → image → layout → END --
-        builder.add_edge(START, "script")
+        # -- 边：script → character → storyboard → image → layout → END --
         builder.add_edge("script", "character")
         builder.add_edge("character", "storyboard")
         builder.add_edge("storyboard", "image")
         builder.add_edge("image", "layout")
         builder.add_edge("layout", END)
+
+        # -- 入口：根据 resume_phase 决定从哪个节点开始 --
+        phase_to_node: dict[str, str] = {
+            "init": "script",
+            "script": "character",
+            "character": "storyboard",
+            "storyboard": "image",
+            "image": "layout",
+            "layout": "layout",
+        }
+        start_node = "script"
+        if self._resume_phase and self._resume_phase in phase_to_node:
+            start_node = phase_to_node[self._resume_phase]
+        builder.add_edge(START, start_node)
 
         return builder
 
@@ -162,6 +197,20 @@ class ComicWorkflow:
         elapsed = (time.perf_counter() - t0) * 1000
         writer(log_performance("script_agent", elapsed))
         writer(WorkflowMessage(WorkflowEvent.NODE_END, "script_agent"))
+
+        # --- Checkpoint & auto-save ---
+        self._save_checkpoint(state)
+        if should_pause(state, "after_script"):
+            writer(CheckpointSignal(
+                checkpoint_id="after_script",
+                label=KEY_CHECKPOINTS["after_script"],
+                payload={
+                    "phase": state.get("current_phase", "?"),
+                    "project_id": state.get("project_id", "?"),
+                },
+            ))
+            await self._await_response()
+
         return state
 
     async def _node_character(self, state: ComicState) -> ComicState:
@@ -226,6 +275,20 @@ class ComicWorkflow:
         elapsed = (time.perf_counter() - t0) * 1000
         writer(log_performance("character_agent", elapsed))
         writer(WorkflowMessage(WorkflowEvent.NODE_END, "character_agent"))
+
+        # --- Checkpoint & auto-save ---
+        self._save_checkpoint(state)
+        if should_pause(state, "after_character"):
+            writer(CheckpointSignal(
+                checkpoint_id="after_character",
+                label=KEY_CHECKPOINTS["after_character"],
+                payload={
+                    "phase": state.get("current_phase", "?"),
+                    "project_id": state.get("project_id", "?"),
+                },
+            ))
+            await self._await_response()
+
         return state
 
     async def _node_storyboard(self, state: ComicState) -> ComicState:
@@ -280,6 +343,20 @@ class ComicWorkflow:
         elapsed = (time.perf_counter() - t0) * 1000
         writer(log_performance("storyboard_agent", elapsed))
         writer(WorkflowMessage(WorkflowEvent.NODE_END, "storyboard_agent"))
+
+        # --- Checkpoint & auto-save ---
+        self._save_checkpoint(state)
+        if should_pause(state, "after_storyboard"):
+            writer(CheckpointSignal(
+                checkpoint_id="after_storyboard",
+                label=KEY_CHECKPOINTS["after_storyboard"],
+                payload={
+                    "phase": state.get("current_phase", "?"),
+                    "project_id": state.get("project_id", "?"),
+                },
+            ))
+            await self._await_response()
+
         return state
 
     async def _node_image(self, state: ComicState) -> ComicState:
@@ -428,6 +505,20 @@ class ComicWorkflow:
         elapsed = (time.perf_counter() - t0) * 1000
         writer(log_performance("layout_agent", elapsed))
         writer(WorkflowMessage(WorkflowEvent.NODE_END, "layout_agent"))
+
+        # --- Checkpoint & auto-save ---
+        self._save_checkpoint(state)
+        if should_pause(state, "after_layout"):
+            writer(CheckpointSignal(
+                checkpoint_id="after_layout",
+                label=KEY_CHECKPOINTS["after_layout"],
+                payload={
+                    "phase": state.get("current_phase", "?"),
+                    "project_id": state.get("project_id", "?"),
+                },
+            ))
+            await self._await_response()
+
         return state
 
     # ------------------------------------------------------------------
@@ -437,11 +528,27 @@ class ComicWorkflow:
     async def arun(self, state: ComicState) -> AsyncIterator[object]:
         """异步执行工作流，流式吐出消息。
 
-        简化的线性流水线（无审查/确认），5 个 Agent 顺序执行。
+        线性流水线，5 个 Agent 顺序执行。
+        支持 CheckpointSignal 暂停与 resume。
         """
+        # 捕获事件循环引用（供 respond() 线程安全调用）
+        self._loop = asyncio.get_running_loop()
+
+        # 跨会话恢复：合并已保存的 state
+        if self._saved_state is not None:
+            for key, value in self._saved_state.items():
+                if key not in state or not state[key]:
+                    state[key] = value  # type: ignore[literal-required]
+
         workflow_t0 = time.perf_counter()
+        resume_note = ""
+        if self._resume_phase and self._resume_phase not in ("init",):
+            resume_note = f" (从 {self._resume_phase} 恢复)"
         yield WorkflowMessage(WorkflowEvent.NODE_START, "workflow")
-        yield log_workflow_event("工作流启动", f"project={state.get('project_id', '?')}")
+        yield log_workflow_event(
+            f"工作流启动{resume_note}",
+            f"project={state.get('project_id', '?')}",
+        )
 
         config: dict[str, Any] = {
             "configurable": {"thread_id": state.get("project_id", "default")}
@@ -482,6 +589,49 @@ class ComicWorkflow:
             f"耗时 {total_elapsed:.0f}ms, "
             f"pages={len(state.get('final_pages', []))}")
         yield WorkflowMessage(WorkflowEvent.WORKFLOW_DONE, "workflow", state)
+
+    # ------------------------------------------------------------------
+    # Checkpoint / Resume 机制
+    # ------------------------------------------------------------------
+
+    def _save_checkpoint(self, state: ComicState) -> None:
+        """在每个 Agent 完成后自动保存项目状态。"""
+        try:
+            proj = state_to_project(state)
+            save_project(proj)
+        except Exception:
+            pass  # 保存失败不应中断工作流
+
+    async def _await_response(self) -> None:
+        """阻塞当前节点，直到 UI 线程调用 respond() 恢复。"""
+        self._response_event = asyncio.Event()
+        await self._response_event.wait()
+
+    def respond(self, decision: str) -> None:
+        """由 UI 线程调用，恢复暂停的工作流。
+
+        使用 call_soon_threadsafe 安全地通知后台 asyncio 事件循环。
+        """
+        self._last_decision = decision
+        if self._response_event and self._loop and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._response_event.set)
+
+    @classmethod
+    def from_saved_project(cls, project_id: str) -> "ComicWorkflow | None":
+        """从已保存的项目创建可恢复的 ComicWorkflow。
+
+        加载 project.json，读取 current_phase，构造从对应节点开始的工作流。
+        返回 None 表示项目不存在或无法加载。
+        """
+        from comicweaver.storage import load_project, project_to_state
+        project = load_project(project_id)
+        if project is None:
+            return None
+        state = project_to_state(project)
+        phase = state.get("current_phase", "init")
+        wf = cls(resume_phase=phase)
+        wf._saved_state = state
+        return wf
 
     # ------------------------------------------------------------------
     # 辅助方法

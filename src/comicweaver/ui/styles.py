@@ -267,4 +267,84 @@ CUSTOM_CSS = """
     color: #64748b;
     margin-top: 2px;
 }
+
+/* ===== 页面阅读器 ===== */
+.cw-page-reader {
+    background: #f8fafc;
+    padding: 20px;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+}
+.cw-page-nav {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 16px;
+}
+.cw-page-nav-btn {
+    padding: 8px 20px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    background: white;
+    cursor: pointer;
+    font-size: 14px;
+    color: #374151;
+    transition: all 0.2s;
+}
+.cw-page-nav-btn:hover:not(:disabled) {
+    background: #3b82f6;
+    color: white;
+    border-color: #3b82f6;
+}
+.cw-page-nav-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* ===== 分镜对比 ===== */
+.cw-comparison-grid {
+    padding: 4px;
+}
+.cw-comparison-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px;
+}
+
+/* ===== 气泡叠加层 ===== */
+.cw-bubble-overlay {
+    position: absolute;
+    border: 2px dashed #f59e0b;
+    border-radius: 4px;
+    pointer-events: none;
+    min-width: 20px;
+    min-height: 20px;
+}
+.cw-bubble-text {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    font-size: 8px;
+    color: #92400e;
+    background: rgba(255,255,255,0.85);
+    padding: 1px 3px;
+    border-radius: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 90%;
+}
+
+/* ===== 实时面板预览 ===== */
+.cw-live-preview {
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: 8px;
+    padding: 8px;
+    min-height: 48px;
+}
 """

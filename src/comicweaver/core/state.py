@@ -16,6 +16,7 @@ class ComicState(TypedDict, total=False):
     """LangGraph 工作流状态字典。"""
     # 输入
     user_input: str
+    title: str
     creation_mode: str
     style_preset: str
     interaction_mode: str
@@ -61,10 +62,12 @@ def make_initial_state(
     style_preset: str = "manga",
     interaction_mode: str = "semi_auto",
     target_pages: int = 4,
+    title: str = "",
 ) -> ComicState:
     """构造初始状态。"""
     return ComicState(
         user_input=user_input,
+        title=title or user_input[:30],
         creation_mode=creation_mode,
         style_preset=style_preset,
         interaction_mode=interaction_mode,
