@@ -30,6 +30,7 @@ from .html_widgets import (
     render_page_reader,
     render_panel_images_gallery,
     render_performance_summary,
+    render_project_info,
     render_review_full_detail,
     render_review_history,
     render_score_bars,
@@ -298,13 +299,15 @@ def start_workflow() -> Iterator[tuple]:
             render_checkpoint(None),
             render_score_bars({}),
             render_live_panel_preview([]),
+            render_project_info(),
         )
         return
 
     # 检测是否为恢复：若已有 workflow 且来自已保存项目，则复用
     current_phase = SESSION.state.get("current_phase", "init")
+    is_resume = current_phase not in ("init",)
     if SESSION.workflow is None:
-        if current_phase not in ("init",):
+        if is_resume:
             SESSION.workflow = ComicWorkflow(resume_phase=current_phase)
         else:
             SESSION.workflow = ComicWorkflow()
@@ -319,19 +322,20 @@ def start_workflow() -> Iterator[tuple]:
         _consume_workflow(SESSION), loop
     )
 
-    # 周期性轮询session状态
+    resume_note = " (从断点恢复)" if is_resume else ""
     yield (
-        "🚀 工作流已启动...",
+        f"🚀 工作流已启动{resume_note}...",
         render_agent_grid(SESSION.active_agent, SESSION.done_agents),
         render_log(SESSION.event_log),
         render_checkpoint(SESSION.last_checkpoint),
         render_score_bars(SESSION.review_scores),
         render_live_panel_preview(SESSION.panel_images_preview),
+        render_project_info(SESSION.state),
     )
 
     while True:
         time.sleep(0.5)
-        status = "🚀 运行中..."
+        status = f"🚀 运行中...{resume_note}" if not resume_note else "🚀 运行中..."
         if SESSION.workflow_done:
             status = "✅ 工作流已完成"
         elif SESSION.error:
@@ -346,12 +350,12 @@ def start_workflow() -> Iterator[tuple]:
             render_checkpoint(SESSION.last_checkpoint),
             render_score_bars(SESSION.review_scores),
             render_live_panel_preview(SESSION.panel_images_preview),
+            render_project_info(SESSION.state),
         )
 
         if SESSION.workflow_done or SESSION.error:
             break
         if SESSION.last_checkpoint:
-            # 暂停在checkpoint,等待用户响应
             break
 
 
@@ -365,25 +369,28 @@ def respond_checkpoint(decision: str) -> Iterator[tuple]:
             render_checkpoint(None),
             render_score_bars(SESSION.review_scores),
             render_live_panel_preview(SESSION.panel_images_preview),
+            render_project_info(SESSION.state),
         )
         return
 
     SESSION.workflow.respond(decision)
+    decision_label = {"accept": "接受并继续", "regenerate": "重新生成"}.get(decision, decision)
     SESSION.event_log.append({
         "agent": "user",
         "type": "log",
-        "content": f"用户决策: {decision}",
+        "content": f"用户决策: {decision_label}",
         "timestamp": time.time(),
     })
     SESSION.last_checkpoint = None
 
     yield (
-        f"✅ 已响应: {decision},工作流继续...",
+        f"✅ 已响应: {decision_label},工作流继续...",
         render_agent_grid(SESSION.active_agent, SESSION.done_agents),
         render_log(SESSION.event_log),
         render_checkpoint(None),
         render_score_bars(SESSION.review_scores),
         render_live_panel_preview(SESSION.panel_images_preview),
+        render_project_info(SESSION.state),
     )
 
     while True:
@@ -403,6 +410,7 @@ def respond_checkpoint(decision: str) -> Iterator[tuple]:
             render_checkpoint(SESSION.last_checkpoint),
             render_score_bars(SESSION.review_scores),
             render_live_panel_preview(SESSION.panel_images_preview),
+            render_project_info(SESSION.state),
         )
 
         if SESSION.workflow_done or SESSION.error or SESSION.last_checkpoint:
@@ -561,19 +569,19 @@ def _format_timestamp(ts: float) -> str:
     return dt.strftime("%Y-%m-%d %H:%M")
 
 
-def open_project_callback(selected_row: list) -> tuple[str, str, str, str, str, str]:
+def open_project_callback(selected_row: list) -> tuple:
     """打开选中的已保存项目。"""
     from comicweaver.storage import load_project, project_to_state
 
     if not selected_row or not selected_row[0]:
         empty = '<div style="color:#64748b;padding:12px;">请先在项目列表中选择一个项目</div>'
-        return "❌ 未选择项目", empty, empty, empty, empty, empty
+        return ("❌ 未选择项目", empty, empty, empty, empty, empty, empty)
 
     project_id = str(selected_row[0])
     project = load_project(project_id)
     if project is None:
         empty = '<div style="color:#64748b;padding:12px;">项目不存在</div>'
-        return f"❌ 项目 {project_id} 不存在", empty, empty, empty, empty
+        return (f"❌ 项目 {project_id} 不存在", empty, empty, empty, empty, empty, empty)
 
     state = project_to_state(project)
     SESSION.reset()
@@ -587,6 +595,7 @@ def open_project_callback(selected_row: list) -> tuple[str, str, str, str, str, 
         render_checkpoint(None),
         render_score_bars({}),
         render_live_panel_preview([]),
+        render_project_info(state),
     )
 
 
@@ -704,6 +713,9 @@ def build_ui() -> gr.Blocks:
             with gr.Tab("🚀 创作流程"):
                 gr.Markdown("### 实时监控 6 个 Agent 的协作")
 
+                gr.Markdown("#### 当前项目")
+                project_info_html = gr.HTML(render_project_info())
+
                 with gr.Row():
                     start_btn = gr.Button(
                         "▶ 启动工作流",
@@ -740,8 +752,6 @@ def build_ui() -> gr.Blocks:
                                             elem_classes="cw-btn-primary")
                     regen_btn = gr.Button("↻ 重新生成本阶段",
                                             elem_classes="cw-btn-secondary")
-                    skip_btn = gr.Button("⏭ 跳过此阶段",
-                                            elem_classes="cw-btn-secondary")
 
                 with gr.Row():
                     save_btn = gr.Button("💾 保存当前项目",
@@ -750,25 +760,18 @@ def build_ui() -> gr.Blocks:
                         label="", interactive=False, scale=3,
                     )
 
-                start_btn.click(
-                    start_workflow,
-                    outputs=[workflow_status, agent_grid_html, log_html,
-                              checkpoint_html, score_html, panel_preview_html],
-                )
+                wf_outputs = [workflow_status, agent_grid_html, log_html,
+                              checkpoint_html, score_html, panel_preview_html,
+                              project_info_html]
+
+                start_btn.click(start_workflow, outputs=wf_outputs)
                 accept_btn.click(
                     lambda: (yield from respond_checkpoint("accept")),
-                    outputs=[workflow_status, agent_grid_html, log_html,
-                              checkpoint_html, score_html, panel_preview_html],
+                    outputs=wf_outputs,
                 )
                 regen_btn.click(
                     lambda: (yield from respond_checkpoint("regenerate")),
-                    outputs=[workflow_status, agent_grid_html, log_html,
-                              checkpoint_html, score_html, panel_preview_html],
-                )
-                skip_btn.click(
-                    lambda: (yield from respond_checkpoint("skip")),
-                    outputs=[workflow_status, agent_grid_html, log_html,
-                              checkpoint_html, score_html, panel_preview_html],
+                    outputs=wf_outputs,
                 )
                 save_btn.click(
                     save_current_project,
@@ -959,7 +962,8 @@ def build_ui() -> gr.Blocks:
                     open_project_callback,
                     inputs=[project_table],
                     outputs=[open_project_status, agent_grid_html, log_html,
-                             checkpoint_html, score_html, panel_preview_html],
+                             checkpoint_html, score_html, panel_preview_html,
+                             project_info_html],
                 )
 
             # ---- Tab 6: 关于 ----

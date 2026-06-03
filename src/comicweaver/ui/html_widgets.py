@@ -648,6 +648,34 @@ def render_panel_images_gallery(panel_images: list[dict]) -> str:
     """
 
 
+def render_project_info(state: dict | None = None) -> str:
+    """渲染当前项目信息栏（创作流程 Tab 顶部）。"""
+    if not state:
+        return '<div style="color:#94a3b8;padding:8px;font-size:12px;">尚未创建项目</div>'
+
+    title = state.get("title", "") or "未命名"
+    pid = state.get("project_id", "?")
+    phase = state.get("current_phase", "init")
+    phase_labels = {
+        "init": "等待开始", "script": "剧本阶段", "character": "角色阶段",
+        "storyboard": "分镜阶段", "image": "图像阶段", "layout": "排版阶段",
+    }
+    phase_label = phase_labels.get(phase, phase)
+
+    return f"""
+    <div style="display:flex;align-items:center;gap:16px;padding:10px 16px;
+                background:linear-gradient(135deg,#1e293b 0%,#334155 100%);
+                border-radius:10px;color:white;font-size:13px;">
+        <div style="font-weight:700;font-size:15px;">📋 {html.escape(title)}</div>
+        <div style="opacity:0.7;font-size:11px;font-family:monospace;">ID: {html.escape(pid)}</div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+            <span style="background:rgba(255,255,255,0.15);padding:3px 10px;border-radius:12px;
+                         font-size:11px;">📌 {html.escape(phase_label)}</span>
+        </div>
+    </div>
+    """
+
+
 def render_live_panel_preview(panel_images: list[dict]) -> str:
     """渲染实时面板图像预览（创作流程 Tab 中使用，简洁缩略图网格）。"""
     if not panel_images:
