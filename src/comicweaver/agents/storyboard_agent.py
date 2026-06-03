@@ -121,12 +121,20 @@ def _map_shot_size(shot_value: str) -> str:
     return _SHOT_SIZE_TAGS.get(shot_value, shot_value.replace("_", " "))
 
 
+def _ensure_str(value) -> str:
+    """Normalise a value that may be str or list[str] to a comma-separated string."""
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value)
+    return str(value) if value else ""
+
+
 def _strip_gender_tag_prefix(char_tags: str, gender_tag: str) -> str:
     """Remove the gender_tag prefix from char_tags to avoid duplication.
 
     Example: _strip_gender_tag_prefix("1girl, solo, young_adult, ...", "1girl")
             -> "solo, young_adult, ..."
     """
+    char_tags = _ensure_str(char_tags)
     if not char_tags or not gender_tag:
         return char_tags
     tags = [t.strip() for t in char_tags.split(",")]
@@ -137,6 +145,7 @@ def _strip_gender_tag_prefix(char_tags: str, gender_tag: str) -> str:
 
 def _deduplicate_tags(tags_str: str) -> str:
     """Remove duplicate tags while preserving first-occurrence order."""
+    tags_str = _ensure_str(tags_str)
     seen: set[str] = set()
     result: list[str] = []
     for tag in tags_str.split(","):
@@ -181,7 +190,7 @@ def _build_prompt_from_llm_data(panel_data: dict, char_gender_tag: str) -> Promp
 
     # Background — minimal, only 1-2 key tags
     scene_parts = []
-    setting = panel_data.get("setting", "")
+    setting = _ensure_str(panel_data.get("setting", ""))
     if setting:
         setting_tags = [s.strip() for s in setting.split(",")][:2]
         scene_parts.extend(setting_tags)
