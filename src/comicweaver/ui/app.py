@@ -300,6 +300,8 @@ def start_workflow() -> Iterator[tuple]:
             render_score_bars({}),
             render_live_panel_preview([]),
             render_project_info(),
+            gr.update(interactive=False),  # accept_btn
+            gr.update(interactive=False),  # regen_btn
         )
         return
 
@@ -331,16 +333,19 @@ def start_workflow() -> Iterator[tuple]:
         render_score_bars(SESSION.review_scores),
         render_live_panel_preview(SESSION.panel_images_preview),
         render_project_info(SESSION.state),
+        gr.update(interactive=False),  # accept_btn
+        gr.update(interactive=False),  # regen_btn
     )
 
     while True:
         time.sleep(0.5)
+        at_checkpoint = SESSION.last_checkpoint is not None
         status = f"🚀 运行中...{resume_note}" if not resume_note else "🚀 运行中..."
         if SESSION.workflow_done:
             status = "✅ 工作流已完成"
         elif SESSION.error:
             status = f"❌ {SESSION.error}"
-        elif SESSION.last_checkpoint:
+        elif at_checkpoint:
             status = f"⏸ 等待确认: {SESSION.last_checkpoint['label']}"
 
         yield (
@@ -351,11 +356,13 @@ def start_workflow() -> Iterator[tuple]:
             render_score_bars(SESSION.review_scores),
             render_live_panel_preview(SESSION.panel_images_preview),
             render_project_info(SESSION.state),
+            gr.update(interactive=at_checkpoint),  # accept_btn
+            gr.update(interactive=at_checkpoint),  # regen_btn
         )
 
         if SESSION.workflow_done or SESSION.error:
             break
-        if SESSION.last_checkpoint:
+        if at_checkpoint:
             break
 
 
@@ -370,6 +377,8 @@ def respond_checkpoint(decision: str) -> Iterator[tuple]:
             render_score_bars(SESSION.review_scores),
             render_live_panel_preview(SESSION.panel_images_preview),
             render_project_info(SESSION.state),
+            gr.update(interactive=False),
+            gr.update(interactive=False),
         )
         return
 
@@ -391,16 +400,19 @@ def respond_checkpoint(decision: str) -> Iterator[tuple]:
         render_score_bars(SESSION.review_scores),
         render_live_panel_preview(SESSION.panel_images_preview),
         render_project_info(SESSION.state),
+        gr.update(interactive=False),  # 响应后立刻禁用，等待下一轮
+        gr.update(interactive=False),
     )
 
     while True:
         time.sleep(0.5)
+        at_checkpoint = SESSION.last_checkpoint is not None
         status = "🚀 运行中..."
         if SESSION.workflow_done:
             status = "✅ 工作流已完成"
         elif SESSION.error:
             status = f"❌ {SESSION.error}"
-        elif SESSION.last_checkpoint:
+        elif at_checkpoint:
             status = f"⏸ 等待确认: {SESSION.last_checkpoint['label']}"
 
         yield (
@@ -411,9 +423,11 @@ def respond_checkpoint(decision: str) -> Iterator[tuple]:
             render_score_bars(SESSION.review_scores),
             render_live_panel_preview(SESSION.panel_images_preview),
             render_project_info(SESSION.state),
+            gr.update(interactive=at_checkpoint),
+            gr.update(interactive=at_checkpoint),
         )
 
-        if SESSION.workflow_done or SESSION.error or SESSION.last_checkpoint:
+        if SESSION.workflow_done or SESSION.error or at_checkpoint:
             break
 
 
@@ -575,13 +589,15 @@ def open_project_callback(selected_row: list) -> tuple:
 
     if not selected_row or not selected_row[0]:
         empty = '<div style="color:#64748b;padding:12px;">请先在项目列表中选择一个项目</div>'
-        return ("❌ 未选择项目", empty, empty, empty, empty, empty, empty)
+        return ("❌ 未选择项目", empty, empty, empty, empty, empty, empty,
+                gr.update(interactive=False), gr.update(interactive=False))
 
     project_id = str(selected_row[0])
     project = load_project(project_id)
     if project is None:
         empty = '<div style="color:#64748b;padding:12px;">项目不存在</div>'
-        return (f"❌ 项目 {project_id} 不存在", empty, empty, empty, empty, empty, empty)
+        return (f"❌ 项目 {project_id} 不存在", empty, empty, empty, empty, empty, empty,
+                gr.update(interactive=False), gr.update(interactive=False))
 
     state = project_to_state(project)
     SESSION.reset()
@@ -596,6 +612,8 @@ def open_project_callback(selected_row: list) -> tuple:
         render_score_bars({}),
         render_live_panel_preview([]),
         render_project_info(state),
+        gr.update(interactive=False),
+        gr.update(interactive=False),
     )
 
 
@@ -762,7 +780,7 @@ def build_ui() -> gr.Blocks:
 
                 wf_outputs = [workflow_status, agent_grid_html, log_html,
                               checkpoint_html, score_html, panel_preview_html,
-                              project_info_html]
+                              project_info_html, accept_btn, regen_btn]
 
                 start_btn.click(start_workflow, outputs=wf_outputs)
                 accept_btn.click(
@@ -963,7 +981,7 @@ def build_ui() -> gr.Blocks:
                     inputs=[project_table],
                     outputs=[open_project_status, agent_grid_html, log_html,
                              checkpoint_html, score_html, panel_preview_html,
-                             project_info_html],
+                             project_info_html, accept_btn, regen_btn],
                 )
 
             # ---- Tab 6: 关于 ----
