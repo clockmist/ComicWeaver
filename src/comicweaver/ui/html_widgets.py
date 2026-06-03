@@ -1152,3 +1152,184 @@ def _render_page_svg(page_data: dict) -> str:
         {"".join(rects)}
     </svg>
     """
+
+
+# ============================================================================
+# v0.3 前端重设计：Claude Code 风格渲染函数
+# ============================================================================
+
+_PHASE_AGENTS_V3 = [
+    ("script_agent", "📝 剧本"),
+    ("character_agent", "👤 角色"),
+    ("storyboard_agent", "🎬 分镜"),
+    ("image_agent", "🎨 图像"),
+    ("layout_agent", "📐 排版"),
+]
+
+
+def render_agent_status_bar(active: str, done: list[str]) -> str:
+    """紧凑型 Agent 状态条 — 水平排列的圆点 + 标签。"""
+    pills = []
+    for agent_id, label in _PHASE_AGENTS_V3:
+        if agent_id == active:
+            cls = "active"
+            dot = "●"
+        elif agent_id in done:
+            cls = "done"
+            dot = "✓"
+        else:
+            cls = "pending"
+            dot = "○"
+        pills.append(
+            f'<span class="cw-as-pill cw-as-{cls}">'
+            f'{dot} {label}'
+            f'</span>'
+        )
+    return f"""
+    <div class="cw-agent-status">
+        {''.join(pills)}
+    </div>
+    """
+
+
+def render_stream_log(events: list[dict]) -> str:
+    """Claude Code 风格流式日志 — 暗色终端，时间线事件。
+
+    事件类型与样式映射：
+    - thinking → 紫色，左侧缩进
+    - progress → 蓝色进度条
+    - log / dev_* → 灰色信息
+    - done → 绿色 ✓
+    - error → 红色 ✗
+    - checkpoint → 黄色高亮
+    """
+    if not events:
+        return '<div class="cw-stream-log"><div class="cw-stream-empty">等待工作流启动...</div></div>'
+
+    lines = []
+    for evt in events[-80:]:  # 最近 80 条
+        ts = evt.get("timestamp", 0)
+        time_str = time.strftime("%H:%M:%S", time.localtime(ts)) if ts else "--:--:--"
+        evt_type = str(evt.get("type", "log"))
+        content = str(evt.get("content", ""))
+        agent = str(evt.get("agent", ""))
+
+        # 类型 → CSS class + 图标
+        type_css, icon = _stream_entry_style(evt_type, content)
+
+        # 构造条目
+        lines.append(
+            f'<div class="cw-stream-entry {type_css}">'
+            f'<span class="cw-stream-time">{time_str}</span> '
+            f'<span class="cw-stream-icon">{icon}</span> '
+            f'<span class="cw-stream-content">{html.escape(content)}</span>'
+            f'</div>'
+        )
+
+    return f"""
+    <div class="cw-stream-log" id="cw-stream-log">
+        {"".join(lines)}
+    </div>
+    """
+
+
+def _stream_entry_style(evt_type: str, content: str) -> tuple[str, str]:
+    """Map event type to CSS class and icon."""
+    if evt_type in ("thinking", "progress"):
+        return "cw-stream-thinking", "💭"
+    if evt_type == "done":
+        return "cw-stream-done", "✓"
+    if evt_type == "error":
+        return "cw-stream-error", "✗"
+    if evt_type == "checkpoint":
+        return "cw-stream-checkpoint", "⏸"
+    if evt_type.startswith("dev_"):
+        return "cw-stream-debug", "🔧"
+    if evt_type == "partial":
+        return "cw-stream-partial", "📤"
+    return "cw-stream-info", "▸"
+
+
+def render_project_cards(projects: list[dict]) -> str:
+    """以卡片网格展示已保存的项目列表。
+
+    每个 dict 应有: project_id, title, updated_at_str, phase
+    """
+    if not projects:
+        return '<div class="cw-stream-empty">暂无已保存的项目。<br>在「项目」Tab 创建新项目后运行工作流，项目会自动保存。</div>'
+
+    phase_labels = {
+        "init": "等待开始", "script": "剧本", "character": "角色",
+        "storyboard": "分镜", "image": "图像", "layout": "排版",
+    }
+
+    cards = []
+    for p in projects:
+        pid = p.get("project_id", "?")
+        title = p.get("title", "未命名")
+        updated = p.get("updated_at_str", "?")
+        phase = p.get("phase", "init")
+        phase_label = phase_labels.get(phase, phase)
+
+        cards.append(f"""
+        <div class="cw-project-card" onclick="document.dispatchEvent(
+            new CustomEvent('cw-select-project', {{detail: '{html.escape(pid)}'}}))">
+            <div class="cw-project-card-title">{html.escape(title)}</div>
+            <div class="cw-project-card-id">{html.escape(pid)}</div>
+            <div class="cw-project-card-meta">
+                <span class="cw-badge">{phase_label}</span>
+                <span style="font-size:11px;color:#94a3b8;">{html.escape(updated)}</span>
+            </div>
+        </div>
+        """)
+
+    return f"""
+    <div class="cw-project-cards">
+        {"".join(cards)}
+    </div>
+    """
+
+
+def render_workflow_left(
+    active: str,
+    done: list[str],
+    events: list[dict],
+    checkpoint: dict | None,
+) -> str:
+    """组合渲染工作流左栏：状态条 + 流式日志 + checkpoint。"""
+    status = render_agent_status_bar(active, done)
+    log = render_stream_log(events)
+    cp = render_inline_checkpoint(checkpoint)
+    return f"""
+    <div class="cw-workflow-left">
+        {status}
+        {log}
+        {cp}
+    </div>
+    """
+
+
+def render_inline_checkpoint(checkpoint: dict | None) -> str:
+    """内联 Checkpoint 面板 — 嵌入在流式日志底部。"""
+    if not checkpoint:
+        return ""
+
+    label = checkpoint.get("label", "确认")
+    payload = checkpoint.get("payload", {})
+    phase = payload.get("phase", "?")
+    pid = payload.get("project_id", "?")
+
+    items = "".join(
+        f'<span style="margin-right:12px;font-size:12px;"><strong>{html.escape(str(k))}</strong>: {html.escape(str(v)[:40])}</span>'
+        for k, v in payload.items()
+    )
+
+    return f"""
+    <div class="cw-inline-checkpoint">
+        <div class="cw-checkpoint-header">
+            ⏸ <strong>{html.escape(label)}</strong>
+        </div>
+        <div class="cw-checkpoint-meta">{items}</div>
+        <div class="cw-checkpoint-hint">请在上方按钮中选择「接受并继续」或「重新生成」</div>
+    </div>
+    """
