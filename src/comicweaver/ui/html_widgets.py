@@ -561,10 +561,11 @@ def render_character_profiles(character_db: dict | None,
         # 参考图
         img_path = ref.get("image_path", "")
         img_html = ""
-        if img_path and os.path.exists(img_path):
+        if img_path and os.path.exists(str(img_path)):
+            safe_path = str(img_path).replace("\\", "/")
             img_html = (
                 f'<div style="text-align:center;margin:8px 0;">'
-                f'<img src="/gradio_api/file={html.escape(img_path)}" '
+                f'<img src="/gradio_api/file={html.escape(safe_path)}" '
                 f'style="max-width:150px;max-height:200px;border:1px solid #e2e8f0;'
                 f'border-radius:8px;" alt="{name} 参考图"/>'
                 f'</div>'
@@ -612,9 +613,10 @@ def render_panel_images_gallery(panel_images: list[dict]) -> str:
         prompt = pi.get("prompt_used", "")[:80] or ""
 
         img_html = ""
-        if path and os.path.exists(path):
+        if path and os.path.exists(str(path)):
+            safe_path = str(path).replace("\\", "/")
             img_html = (
-                f'<img src="/gradio_api/file={html.escape(path)}" '
+                f'<img src="/gradio_api/file={html.escape(safe_path)}" '
                 f'style="width:100%;height:180px;object-fit:cover;border-radius:6px;" '
                 f'alt="{html.escape(pid)}" loading="lazy"/>'
             )
@@ -687,9 +689,10 @@ def render_live_panel_preview(panel_images: list[dict]) -> str:
         path = pi.get("image_path", "") if isinstance(pi, dict) else getattr(pi, "image_path", "")
 
         img_html = ""
-        if path and os.path.exists(path):
+        if path and os.path.exists(str(path)):
+            safe_path = str(path).replace("\\", "/")
             img_html = (
-                f'<img src="/gradio_api/file={html.escape(str(path))}" '
+                f'<img src="/gradio_api/file={html.escape(safe_path)}" '
                 f'style="width:100%;height:120px;object-fit:cover;border-radius:4px;" '
                 f'alt="{html.escape(str(pid))}" loading="lazy"/>'
             )
@@ -955,9 +958,10 @@ def render_page_reader(
     # 主图像
     img_html = ""
     if image_path and os.path.exists(str(image_path)):
+        safe_path = str(image_path).replace("\\", "/")
         img_html = (
-            f'<a href="/gradio_api/file={html.escape(str(image_path))}" target="_blank">'
-            f'<img src="/gradio_api/file={html.escape(str(image_path))}" '
+            f'<a href="/gradio_api/file={html.escape(safe_path)}" target="_blank">'
+            f'<img src="/gradio_api/file={html.escape(safe_path)}" '
             f'style="max-width:100%;max-height:70vh;cursor:zoom-in;border-radius:8px;'
             f'box-shadow:0 4px 16px rgba(0,0,0,0.15);" '
             f'alt="第{page_num}页" />'
@@ -1065,8 +1069,9 @@ def render_comparison_view(plan: list[dict], final_pages: list[dict]) -> str:
         if matched:
             path = matched.get("image_path", "") if isinstance(matched, dict) else getattr(matched, "image_path", "")
             if path and os.path.exists(str(path)):
+                safe_path = str(path).replace("\\", "/")
                 final_img = (
-                    f'<img src="/gradio_api/file={html.escape(str(path))}" '
+                    f'<img src="/gradio_api/file={html.escape(safe_path)}" '
                     f'style="max-width:100%;max-height:400px;border-radius:6px;'
                     f'box-shadow:0 2px 8px rgba(0,0,0,0.1);" '
                     f'alt="第{page_num}页成品" />'
