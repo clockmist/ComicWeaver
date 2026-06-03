@@ -1,14 +1,14 @@
 {
   "3": {
     "inputs": {
-      "seed": 1070400147320648,
+      "seed": 604935863,
       "steps": 25,
       "cfg": 5,
       "sampler_name": "euler_ancestral",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "30",
+        "4",
         0
       ],
       "positive": [
@@ -40,8 +40,8 @@
   },
   "5": {
     "inputs": {
-      "width": 1216,
-      "height": 832,
+      "width": 1024,
+      "height": 1024,
       "batch_size": 1
     },
     "class_type": "EmptyLatentImage",
@@ -51,9 +51,9 @@
   },
   "6": {
     "inputs": {
-      "text": "masterpiece, high score, great score, absurdres,\n1girl, long black hair, red eyes, school uniform, sailor collar,\nmedium shot, from side, walking, school hallway,\nlockers in background, perspective, depth of field,\nlineart, LineAniAF, monochrome, black and white, colorless,\nscreentone, halftone, speed lines, motion lines,\nclean lineart, high contrast, ink drawing,\nsafe",
+      "text": "masterpiece, best quality, newest, safe, female, feminine, 1girl, solo, young_adult, long black hair, round eyes, casual dress, slender build, medium, eye level, walking forward, standing, looking ahead, expectant, path, trees, soft, monochrome, greyscale, black and white manga style, screentone, halftone, ink drawing, clean lineart, high contrast",
       "clip": [
-        "30",
+        "4",
         1
       ]
     },
@@ -64,9 +64,9 @@
   },
   "7": {
     "inputs": {
-      "text": "lowres, bad anatomy, bad hands, text, error, missing finger,\nextra digits, fewer digits, cropped, worst quality, low quality,\nlow score, bad score, average score, signature, watermark,\nusername, blurry, color, colored, multicolored, gradient,\nrainbow, 3d, realistic, photo, photograph, photorealistic,\nnsfw, explicit",
+      "text": "lowres, worst quality, bad quality, displeasing, low resolution, bad anatomy, bad hands, bad fingers, extra digits, fewer digits, cropped, signature, watermark, username, blurry, text, error, color, colored, multicolored, gradient, rainbow, 3d, realistic, photo, photograph, photorealistic, nsfw, explicit",
       "clip": [
-        "30",
+        "4",
         1
       ]
     },
@@ -102,27 +102,6 @@
     "class_type": "SaveImage",
     "_meta": {
       "title": "保存图像"
-    }
-  },
-  "30": {
-    "inputs": {
-      "lora_name": "LineAniRedmondV2-Lineart-LineAniAF.safetensors",
-      "strength_model": 0.8,
-      "strength_clip": 0.8,
-      "prompt": "",
-      "example": "[none]",
-      "model": [
-        "4",
-        0
-      ],
-      "clip": [
-        "4",
-        1
-      ]
-    },
-    "class_type": "LoraLoader|pysssss",
-    "_meta": {
-      "title": "Lora Loader 🐍"
     }
   }
 }

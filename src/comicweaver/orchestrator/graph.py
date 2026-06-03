@@ -23,6 +23,8 @@ from comicweaver.agents import (
     ScriptAgent,
     StoryboardAgent,
 )
+from comicweaver.api import ApiBackendError
+from comicweaver.config import load_config
 from comicweaver.core import (
     AgentContext,
     CharacterDB,
@@ -49,6 +51,8 @@ from comicweaver.utils.logging import (
     log_agent_input,
     log_agent_output,
     log_checkpoint,
+    log_comfyui_request,
+    log_comfyui_response,
     log_fallback,
     log_performance,
     log_review,
@@ -73,6 +77,30 @@ def _make_route_checkpoint(checkpoint_id: str):
     """创建条件边路由函数 —— 判断是否需要进入确认节点。"""
 
     def route(state: ComicState) -> str:
+        if should_pause(state, checkpoint_id):
+            return "checkpoint"
+        return "continue"
+
+    return route
+
+
+def _make_retry_route(agent_name: str, checkpoint_id: str, max_retries: int = 3):
+    """创建条件边路由函数 —— 含 REVISE 重试 + checkpoint 判断。
+
+    逻辑：
+    1. 最后一条 review_result 的 agent 匹配且 decision == "revise"
+       → 检查 retry_count < max_retries → "retry"（回到生产节点）
+    2. 否则按 checkpoint 模式判断 → "checkpoint" 或 "continue"
+    """
+
+    def route(state: ComicState) -> str:
+        review_results = state.get("review_results", [])
+        if review_results:
+            last = review_results[-1]
+            if last.get("agent") == agent_name and last.get("decision") == "revise":
+                retry_count = state.get("retry_counts", {}).get(agent_name, 0)
+                if retry_count <= max_retries:
+                    return "retry"
         if should_pause(state, checkpoint_id):
             return "checkpoint"
         return "continue"
@@ -172,6 +200,7 @@ class ComicWorkflow:
     """
 
     def __init__(self) -> None:
+        self.config = load_config()
         self.script_agent = ScriptAgent()
         self.character_agent = CharacterAgent()
         self.storyboard_agent = StoryboardAgent()
@@ -219,41 +248,41 @@ class ComicWorkflow:
         builder.add_node("checkpoint_storyboard", _make_checkpoint_node("after_storyboard"))
         builder.add_node("checkpoint_layout", _make_checkpoint_node("after_layout"))
 
-        # -- 边：script → review → [checkpoint?] → character --
+        # -- 边：script → review → [retry|checkpoint|continue] --
         builder.add_edge(START, "script")
         builder.add_edge("script", "review_script")
         builder.add_conditional_edges(
             "review_script",
-            _make_route_checkpoint("after_script"),
-            {"checkpoint": "checkpoint_script", "continue": "character"},
+            _make_retry_route("script_agent", "after_script"),
+            {"retry": "script", "checkpoint": "checkpoint_script", "continue": "character"},
         )
         builder.add_edge("checkpoint_script", "character")
 
-        # -- 边：character → review → [checkpoint?] → storyboard --
+        # -- 边：character → review → [retry|checkpoint|continue] --
         builder.add_edge("character", "review_character")
         builder.add_conditional_edges(
             "review_character",
-            _make_route_checkpoint("after_character"),
-            {"checkpoint": "checkpoint_character", "continue": "storyboard"},
+            _make_retry_route("character_agent", "after_character"),
+            {"retry": "character", "checkpoint": "checkpoint_character", "continue": "storyboard"},
         )
         builder.add_edge("checkpoint_character", "storyboard")
 
-        # -- 边：storyboard → review → [checkpoint?] → image --
+        # -- 边：storyboard → review → [retry|checkpoint|continue] --
         builder.add_edge("storyboard", "review_storyboard")
         builder.add_conditional_edges(
             "review_storyboard",
-            _make_route_checkpoint("after_storyboard"),
-            {"checkpoint": "checkpoint_storyboard", "continue": "image"},
+            _make_retry_route("storyboard_agent", "after_storyboard"),
+            {"retry": "storyboard", "checkpoint": "checkpoint_storyboard", "continue": "image"},
         )
         builder.add_edge("checkpoint_storyboard", "image")
 
-        # -- 边：image → layout → review → [checkpoint?] → END --
+        # -- 边：image → layout → review → [retry|checkpoint|continue] --
         builder.add_edge("image", "layout")
         builder.add_edge("layout", "review_layout")
         builder.add_conditional_edges(
             "review_layout",
-            _make_route_checkpoint("after_layout"),
-            {"checkpoint": "checkpoint_layout", "continue": END},
+            _make_retry_route("layout_agent", "after_layout"),
+            {"retry": "layout", "checkpoint": "checkpoint_layout", "continue": END},
         )
         builder.add_edge("checkpoint_layout", END)
 
@@ -295,9 +324,9 @@ class ComicWorkflow:
                     # 开发者日志：Agent 输出摘要
                     writer(log_agent_output("script_agent",
                         summarize_script_output(evt.content)))
-        except Exception:
-            writer(log_agent_error("script_agent", "执行失败",
-                {"raw_text": inputs.raw_text[:100]}))
+        except Exception as exc:
+            writer(log_agent_error("script_agent", f"执行失败: {exc}",
+                {"raw_text": inputs.raw_text[:100], "error_type": type(exc).__name__}))
             raise
 
         elapsed = (time.perf_counter() - t0) * 1000
@@ -339,9 +368,29 @@ class ComicWorkflow:
                     state["character_db"] = evt.content.get("character_db") or {}
                     writer(log_agent_output("character_agent",
                         summarize_character_output(evt.content)))
-        except Exception:
-            writer(log_agent_error("character_agent", "执行失败",
-                {"drafts": [d.name for d in drafts]}))
+                    # 记录每个角色的 ComfyUI 生成参数（种子 + 外观 prompt）
+                    cdb = evt.content.get("character_db") or {}
+                    chars = cdb.get("characters", {})
+                    for cid, cp in chars.items():
+                        writer(log_comfyui_request(
+                            "character_agent",
+                            kind="character_reference",
+                            prompt=cp.get("base_reference", {}).get("generation_prompt", ""),
+                            negative_prompt="(see agent hardcoded negative)",
+                            seed=cp.get("seed", 0),
+                            width=1024,
+                            height=1024,
+                            workflow_path=self.config.image.workflow_character_path,
+                            metadata={
+                                "char_id": cid,
+                                "name": cp.get("name", ""),
+                                "appearance_prompt": cp.get("appearance_prompt", ""),
+                                "gender_tag": cp.get("gender_tag", "1girl"),
+                            },
+                        ))
+        except Exception as exc:
+            writer(log_agent_error("character_agent", f"执行失败: {exc}",
+                {"drafts": [d.name for d in drafts], "error_type": type(exc).__name__}))
             raise
 
         elapsed = (time.perf_counter() - t0) * 1000
@@ -384,12 +433,18 @@ class ComicWorkflow:
             async for evt in self.storyboard_agent.astream(inputs, ctx):
                 writer(evt)
                 if evt.type == StreamEventType.DONE and evt.content:
-                    state["storyboard_plan"] = evt.content.get("pages", [])
+                    pages = evt.content.get("pages", [])
+                    if not pages:
+                        raise ApiBackendError(
+                            "StoryboardAgent returned empty pages — "
+                            "LLM did not generate any panel designs"
+                        )
+                    state["storyboard_plan"] = pages
                     writer(log_agent_output("storyboard_agent",
                         summarize_storyboard_output(evt.content)))
-        except Exception:
-            writer(log_agent_error("storyboard_agent", "执行失败",
-                {"scene_count": len(scenes), "target_pages": inputs.target_pages}))
+        except Exception as exc:
+            writer(log_agent_error("storyboard_agent", f"执行失败: {exc}",
+                {"scene_count": len(scenes), "target_pages": inputs.target_pages, "error_type": type(exc).__name__}))
             raise
 
         elapsed = (time.perf_counter() - t0) * 1000
@@ -405,7 +460,12 @@ class ComicWorkflow:
 
         state["current_phase"] = "image"
         ctx = self._make_context(state)
-        pages = [PageLayout.model_validate(p) for p in state.get("storyboard_plan", [])]
+        raw_storyboard = state.get("storyboard_plan", [])
+        if not raw_storyboard:
+            raise ApiBackendError(
+                "storyboard_plan is empty — no panels to generate images for"
+            )
+        pages = [PageLayout.model_validate(p) for p in raw_storyboard]
         all_panel_images: list[dict] = []
         total_panels = sum(len(page.panels) for page in pages)
 
@@ -438,6 +498,29 @@ class ComicWorkflow:
                             pi = evt.content.get("panel_image")
                             if pi:
                                 all_panel_images.append(pi)
+                                # 记录完整的 ComfyUI 生图参数
+                                writer(log_comfyui_request(
+                                    "image_agent",
+                                    kind="panel",
+                                    prompt=pi.get("prompt_used", ""),
+                                    negative_prompt=pi.get("negative_prompt_used", ""),
+                                    seed=pi.get("seed", 0),
+                                    width=pi.get("width", 0),
+                                    height=pi.get("height", 0),
+                                    workflow_path=self.config.image.workflow_panel_path,
+                                    metadata={
+                                        "panel_id": pi.get("panel_id", "?"),
+                                        "characters": pi.get("characters_present", []),
+                                        "backend": pi.get("backend", "?"),
+                                    },
+                                ))
+                                writer(log_comfyui_response(
+                                    "image_agent",
+                                    kind="panel",
+                                    image_path=pi.get("image_path", ""),
+                                    backend=pi.get("backend", "?"),
+                                    seed=pi.get("seed", 0),
+                                ))
                             # 检测 fallback
                             backend_used = evt.content.get("backend_used", "?")
                             fallback_chain = evt.content.get("fallback_chain", [])
@@ -449,10 +532,10 @@ class ComicWorkflow:
                                 ))
                             writer(log_agent_output("image_agent",
                                 summarize_image_output(evt.content)))
-                except Exception:
+                except Exception as exc:
                     writer(log_agent_error("image_agent",
-                        f"面板 {panel.panel_id} 生成失败",
-                        {"panel_id": panel.panel_id, "panel_idx": panel_idx}))
+                        f"面板 {panel.panel_id} 生成失败: {exc}",
+                        {"panel_id": panel.panel_id, "panel_idx": panel_idx, "error_type": type(exc).__name__}))
                     raise
 
         state["panel_images"] = all_panel_images
@@ -469,7 +552,12 @@ class ComicWorkflow:
 
         state["current_phase"] = "layout"
         ctx = self._make_context(state)
-        pages = [PageLayout.model_validate(p) for p in state.get("storyboard_plan", [])]
+        raw_storyboard = state.get("storyboard_plan", [])
+        if not raw_storyboard:
+            raise ApiBackendError(
+                "storyboard_plan is empty — cannot compose layout without panels"
+            )
+        pages = [PageLayout.model_validate(p) for p in raw_storyboard]
         panel_imgs = {
             p["panel_id"]: PanelImage.model_validate(p)
             for p in state.get("panel_images", [])

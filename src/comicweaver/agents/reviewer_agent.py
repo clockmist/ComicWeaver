@@ -355,7 +355,7 @@ class ReviewerAgent(BaseAgent[ReviewInput, ReviewOutput]):
 
     _REQUIRED_FIELDS = {
         "script_agent": ["title", "scenes", "characters", "emotion_curve"],
-        "character_agent": ["operation"],
+        "character_agent": ["project_id", "characters"],
         "storyboard_agent": ["pages", "total_panels"],
         "image_agent": ["panel_image"],
         "layout_agent": ["final_pages"],

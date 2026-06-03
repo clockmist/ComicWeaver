@@ -8,7 +8,7 @@
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "24",
+        "4",
         0
       ],
       "positive": [
@@ -53,7 +53,7 @@
     "inputs": {
       "text": "mmasterpiece, high score, great score, absurdres,\n1girl, upper body, portrait, bust shot,\nlong black hair, red eyes, school uniform, sailor collar,\nlooking at viewer, neutral expression,\nmonochrome, greyscale, black and white manga style, screentone, ink drawing,\nclean lineart, high contrast, white background,\nsafe",
       "clip": [
-        "24",
+        "4",
         1
       ]
     },
@@ -66,7 +66,7 @@
     "inputs": {
       "text": "lowres, bad anatomy, bad hands, text, error, missing finger, extra digits,\nfewer digits, cropped, worst quality, low quality, low score, bad score,\naverage score, signature, watermark, username, blurry,\ncolor, colored, multicolored, gradient, rainbow,\n3d, realistic, photo, photograph, photorealistic,\nnsfw, explicit\n",
       "clip": [
-        "24",
+        "4",
         1
       ]
     },
@@ -102,25 +102,6 @@
     "class_type": "SaveImage",
     "_meta": {
       "title": "保存图像"
-    }
-  },
-  "24": {
-    "inputs": {
-      "lora_name": "LineAniRedmondV2-Lineart-LineAniAF.safetensors",
-      "strength_model": 0.8,
-      "strength_clip": 0.8,
-      "model": [
-        "4",
-        0
-      ],
-      "clip": [
-        "4",
-        1
-      ]
-    },
-    "class_type": "LoraLoader",
-    "_meta": {
-      "title": "加载LoRA"
     }
   }
 }
