@@ -9,7 +9,6 @@ from comicweaver.core import (
     AgentContext,
     AgentOutputMeta,
     BaseAgent,
-    BoundingBox,
     BubbleHint,
     CameraAngle,
     PageLayout,
@@ -24,46 +23,24 @@ from comicweaver.core import (
     StreamEventType,
 )
 
-# 简单布局模板:每页固定bbox列表(x, y, w, h),坐标0-1
-_LAYOUT_TEMPLATES = {
-    "grid_2x2": [
-        (0.0, 0.0, 0.5, 0.5),
-        (0.5, 0.0, 0.5, 0.5),
-        (0.0, 0.5, 0.5, 0.5),
-        (0.5, 0.5, 0.5, 0.5),
-    ],
-    "grid_3x2": [
-        (0.0, 0.0, 0.5, 0.33),
-        (0.5, 0.0, 0.5, 0.33),
-        (0.0, 0.33, 0.5, 0.33),
-        (0.5, 0.33, 0.5, 0.33),
-        (0.0, 0.66, 0.5, 0.34),
-        (0.5, 0.66, 0.5, 0.34),
-    ],
-    "splash_top": [
-        (0.0, 0.0, 1.0, 0.5),
-        (0.0, 0.5, 0.5, 0.5),
-        (0.5, 0.5, 0.5, 0.5),
-    ],
-    "diagonal": [
-        (0.0, 0.0, 0.6, 0.45),
-        (0.4, 0.0, 0.6, 0.45),
-        (0.0, 0.55, 1.0, 0.45),
-    ],
-    "full_bleed": [
-        (0.0, 0.0, 1.0, 1.0),
-    ],
-}
+# Layout hints — intent passed to LayoutAgent (NO coordinates).
+# LayoutAgent uses these to guide its recursive binary-partition solver.
 
 
-def _select_layout(panel_count: int, climax: bool) -> str:
+def _select_layout_hint(panel_count: int, climax: bool, action_heavy: bool) -> str:
+    """Return a layout *hint* for the page (intent, not coordinates).
+
+    The LayoutAgent uses this to bias its split-direction heuristics.
+    """
     if climax:
-        return "splash_top" if panel_count <= 3 else "diagonal"
+        return "climax"
+    if action_heavy:
+        return "action"
+    if panel_count >= 5:
+        return "dialogue"  # many panels → likely dialogue-heavy
     if panel_count <= 1:
-        return "full_bleed"
-    if panel_count <= 4:
-        return "grid_2x2"
-    return "grid_3x2"
+        return "climax"     # single panel → splash / establishing
+    return "standard"
 
 
 def _select_shot(scene: Scene, panel_idx: int) -> ShotSize:
@@ -177,13 +154,16 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
         for start in range(0, len(panel_specs), per_page):
             chunk = panel_specs[start:start + per_page]
             climax = any(s.emotion_intensity >= 0.85 for s, _ in chunk)
-            template = _select_layout(len(chunk), climax)
-            slots = _LAYOUT_TEMPLATES[template]
+            action_heavy = any(
+                s.actions and len(s.actions) >= 2 for s, _ in chunk
+            )
+
+            # Layout hint only — LayoutAgent computes actual bboxes
+            layout_hint = _select_layout_hint(len(chunk), climax, action_heavy)
 
             page_id = f"page_{page_idx + 1:03d}"
             panels: list[PanelPlan] = []
             for i, (scene, panel_idx) in enumerate(chunk):
-                slot = slots[i % len(slots)]
                 shot = _select_shot(scene, panel_idx)
                 angle = _select_angle(scene)
                 panel_id = f"{page_id}_p{i + 1:02d}"
@@ -202,9 +182,8 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
                         order_in_page=i + 1,
                         source_scene_id=scene.scene_id,
                         source_dialogue_indices=list(range(len(scene.dialogues))),
-                        bbox=BoundingBox(x=slot[0], y=slot[1], width=slot[2], height=slot[3]),
-                        shape=PanelShape.SPLASH if template == "full_bleed" else PanelShape.RECTANGLE,
-                        size_ratio=slot[2] * slot[3],
+                        # bbox uses default (full page) — LayoutAgent overrides
+                        shape=PanelShape.RECTANGLE,
                         shot_size=shot,
                         camera_angle=angle,
                         characters_in_panel=list(scene.characters_present),
@@ -223,7 +202,8 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
                 PageLayout(
                     page_id=page_id,
                     page_number=page_idx + 1,
-                    layout_template=template,
+                    layout_template=layout_hint,  # keep for backward compat; real intent in layout_hint
+                    layout_hint=layout_hint,
                     panels=panels,
                     page_emotion_avg=avg_emotion,
                     is_climax_page=climax,

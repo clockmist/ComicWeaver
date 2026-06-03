@@ -2,7 +2,6 @@
 from .paths import cache_root, outputs_root, project_dir, projects_root, root_dir
 from .placeholder import (
     generate_character_placeholder,
-    generate_page_placeholder,
     generate_panel_placeholder,
 )
 from .project import (
@@ -20,7 +19,6 @@ __all__ = [
     "projects_root",
     "root_dir",
     "generate_character_placeholder",
-    "generate_page_placeholder",
     "generate_panel_placeholder",
     "list_projects",
     "load_project",

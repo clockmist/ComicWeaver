@@ -44,7 +44,6 @@ from comicweaver.core import (
     StreamEventType,
 )
 from comicweaver.utils.logging import (
-    DevLogEntry,
     log_agent_error,
     log_agent_input,
     log_agent_output,
@@ -471,6 +470,11 @@ class ComicWorkflow:
             pages=pages,
             panel_images=panel_imgs,
             style_preset=state.get("style_preset", "manga"),
+            page_width_px=1240,
+            page_height_px=1754,
+            margin_px=40,
+            gutter_px=10,
+            reading_direction="ltr",
         )
 
         # 开发者日志：Agent 输入

@@ -297,7 +297,7 @@ class PanelPlan(BaseModel):
     order_in_page: int
     source_scene_id: str = ""
     source_dialogue_indices: list[int] = Field(default_factory=list)
-    bbox: BoundingBox
+    bbox: BoundingBox = Field(default_factory=lambda: BoundingBox(x=0, y=0, width=1.0, height=1.0))
     shape: PanelShape = PanelShape.RECTANGLE
     size_ratio: float = 0.25
     shot_size: ShotSize = ShotSize.MEDIUM
@@ -316,6 +316,7 @@ class PageLayout(BaseModel):
     page_id: str
     page_number: int
     layout_template: str = "grid_2x2"
+    layout_hint: str = "standard"  # "standard" | "climax" | "action" | "dialogue" | "establishing"
     panels: list[PanelPlan] = Field(default_factory=list)
     page_emotion_avg: float = 0.5
     is_climax_page: bool = False
@@ -440,6 +441,12 @@ class LayoutInput(BaseModel):
     font_config: FontConfig = Field(default_factory=FontConfig)
     export_formats: list[str] = Field(default_factory=lambda: ["png"])
     feedback: ReviewFeedback | None = None
+    # Page geometry
+    page_width_px: int = 1240       # A4 @150dpi
+    page_height_px: int = 1754
+    margin_px: int = 40
+    gutter_px: int = 10
+    reading_direction: Literal["ltr", "rtl"] = "ltr"
 
 
 class LayoutMetrics(BaseModel):
