@@ -40,61 +40,152 @@ class BubblePlacement:
     w: float
     h: float
     occlusion_score: float = 0.0
+    tail_direction: str = "auto"  # "up" | "down" | "left" | "right" | "up_left" | ...
+
+
+def _derive_tail_direction(
+    bubble_center_x: float, bubble_center_y: float,
+    panel_bbox: BoundingBox,
+) -> str:
+    """Determine which way the bubble's tail should point.
+
+    The tail points from the bubble's EDGE toward the panel CENTER
+    (where the speaker is most likely located).  So a bubble in the
+    top-left corner gets a tail pointing "down_right".
+    """
+    pcx = panel_bbox.x + panel_bbox.width / 2
+    pcy = panel_bbox.y + panel_bbox.height / 2
+
+    dx = pcx - bubble_center_x
+    dy = pcy - bubble_center_y
+
+    # Determine primary direction
+    v = ""
+    if dy < -0.02:
+        v = "up"
+    elif dy > 0.02:
+        v = "down"
+
+    h = ""
+    if dx < -0.02:
+        h = "left"
+    elif dx > 0.02:
+        h = "right"
+
+    if v and h:
+        return f"{v}_{h}"
+    if v:
+        return v
+    if h:
+        return h
+    return "down"  # fallback: most bubbles get a tail pointing down
 
 
 # ---------------------------------------------------------------------------
 # Text measurement  (CJK-aware)
 # ---------------------------------------------------------------------------
 
-# Approximate character widths as fraction of font height.
-# CJK chars are roughly square; Latin chars are ~0.5× the CJK width.
-_CJK_RANGES = [
-    (0x4E00, 0x9FFF),   # CJK Unified Ideographs
-    (0x3400, 0x4DBF),   # CJK Unified Ideographs Extension A
-    (0xF900, 0xFAFF),   # CJK Compatibility Ideographs
-    (0x3040, 0x309F),   # Hiragana
-    (0x30A0, 0x30FF),   # Katakana
-    (0xAC00, 0xD7AF),   # Hangul Syllables
-]
-
-
-def _is_cjk(ch: str) -> bool:
-    cp = ord(ch)
-    return any(lo <= cp <= hi for lo, hi in _CJK_RANGES)
+def _load_font(size: int) -> "ImageFont.ImageFont":
+    """Best-effort CJK font loading; falls back to PIL default."""
+    import os as _os
+    from PIL import ImageFont
+    for path in (
+        "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/simhei.ttf",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    ):
+        if _os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                continue
+    return ImageFont.load_default()
 
 
 def estimate_text_size(
     text: str,
     font_size_pt: int = 12,
-    max_width_chars: int = 18,
-    line_height_ratio: float = 1.5,
+    max_width_px: int = 200,
 ) -> tuple[int, int]:
-    """Estimate the pixel size needed to render *text*.
+    """Measure the actual pixel size needed to render *text* using PIL.
 
-    Uses a character-count heuristic that works well for CJK without PIL.
+    Loads the real CJK font at *font_size_pt*, measures each character's
+    width with ``textbbox()``, and wraps lines at *max_width_px*.
 
-    Returns (width_px, height_px).
+    Returns (width_px, height_px) including padding.
     """
     if not text:
-        return (60, 30)  # minimum bubble size
+        return (80, 30)
 
-    # Count effective character widths
-    char_units = 0.0
+_EMPTY_IMAGE = None
+
+
+def _get_draw() -> "ImageDraw.ImageDraw":
+    """Get a reusable PIL ImageDraw for text measurement (lazy init)."""
+    global _EMPTY_IMAGE
+    from PIL import Image, ImageDraw
+    if _EMPTY_IMAGE is None:
+        _EMPTY_IMAGE = Image.new("RGB", (1, 1))
+    return ImageDraw.Draw(_EMPTY_IMAGE)
+
+
+def estimate_text_size(
+    text: str,
+    font_size_pt: int = 12,
+    max_width_px: int = 200,
+) -> tuple[int, int]:
+    """Measure the actual pixel size needed to render *text* using PIL.
+
+    Loads the real CJK font at *font_size_pt*, measures each character's
+    width with ``textbbox()``, and wraps lines at *max_width_px*.
+
+    Returns (width_px, height_px) including padding.
+    """
+    if not text:
+        return (80, 30)
+
+    from PIL import ImageDraw
+
+    font = _load_font(font_size_pt)
+    draw = _get_draw()
+
+    # Line breaking: accumulate characters until exceeding max_width_px
+    lines: list[str] = []
+    current_line = ""
     for ch in text:
-        char_units += 1.0 if _is_cjk(ch) else 0.55
+        candidate = current_line + ch
+        bbox = draw.textbbox((0, 0), candidate, font=font)
+        w = bbox[2] - bbox[0]
+        if w > max_width_px and current_line:
+            lines.append(current_line)
+            current_line = ch
+        else:
+            current_line = candidate
+    if current_line:
+        lines.append(current_line)
 
-    # Line breaking
-    lines = max(1, int(char_units / max_width_chars) + (1 if char_units % max_width_chars > 0 else 0))
-    chars_per_line = min(char_units, max_width_chars)
+    # Measure width of the longest rendered line
+    max_w = 0
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line, font=font)
+        w = bbox[2] - bbox[0]
+        if w > max_w:
+            max_w = w
 
-    # Pixel dimensions
-    char_px = font_size_pt * 1.0   # approximate CJK char width in px at given pt
-    width = int(chars_per_line * char_px) + 20   # + padding
-    height = int(lines * font_size_pt * line_height_ratio) + 16
+    # Height: number of lines × line height
+    # TrueType font .size returns the em height in pixels
+    line_h = font.size + 4 if hasattr(font, "size") else font_size_pt + 4
+    text_h = len(lines) * line_h
 
-    # Clamp
-    width = max(80, min(width, 450))
-    height = max(30, min(height, 300))
+    # Add padding (matching compositor's _draw_bubble_text)
+    pad = 10
+    width = int(max_w) + pad * 2 + 4  # +4 for safety margin
+    height = text_h + pad * 2 + 28    # +28 for speaker label area
+
+    # Clamp to reasonable limits
+    width = max(80, min(width, 500))
+    height = max(40, min(height, 350))
 
     return width, height
 
@@ -162,6 +253,10 @@ def place_bubbles(
     panel_images: dict[str, PanelImage],
     *,
     font_size_pt: int = 12,
+    page_width_px: int = 1240,
+    page_height_px: int = 1754,
+    margin_px: int = 40,
+    faces_by_panel: dict[str, list] | None = None,
 ) -> list[BubblePlacement]:
     """Compute bubble positions for all panels on a page.
 
@@ -175,12 +270,18 @@ def place_bubbles(
         Generated panel images keyed by panel_id (for future image analysis).
     font_size_pt:
         Base font size for text-size estimation.
+    faces_by_panel:
+        Optional dict of panel_id → list[FaceRegion] from VLM detection.
+        When provided, bubble positions are optimized to avoid occluding faces.
 
     Returns
     -------
     list[BubblePlacement]
         All bubbles for the page, with normalised coordinates.
     """
+    if faces_by_panel is None:
+        faces_by_panel = {}
+
     all_bubbles: list[BubblePlacement] = []
 
     for panel, bbox in zip(panels, panel_bboxes, strict=False):
@@ -202,9 +303,11 @@ def place_bubbles(
 
             # Estimate text size → bubble dimensions in normalised space
             text_w_px, text_h_px = estimate_text_size(dialogue.text, font_size_pt)
-            # Convert px to normalised (assuming a reference page width ~1240px)
-            w_norm = text_w_px / 1240.0
-            h_norm = text_h_px / 1754.0
+            # Convert px to normalised using inner dimensions (match compositor)
+            inner_w = page_width_px - margin_px * 2
+            inner_h = page_height_px - margin_px * 2
+            w_norm = text_w_px / max(inner_w, 1)
+            h_norm = text_h_px / max(inner_h, 1)
 
             # Get anchor position from hint
             ax, ay = _bubble_anchor(bbox, hint)
@@ -219,6 +322,11 @@ def place_bubbles(
             bx = max(bbox.x + 0.01, min(bx, bbox.x + bbox.width - w_norm - 0.01))
             by = max(bbox.y + 0.01, min(by, bbox.y + bbox.height - h_norm - 0.01))
 
+            # Derive tail direction
+            bubble_cx = bx + w_norm / 2
+            bubble_cy = by + h_norm / 2
+            tail_dir = _derive_tail_direction(bubble_cx, bubble_cy, bbox)
+
             all_bubbles.append(
                 BubblePlacement(
                     panel_id=panel.panel_id,
@@ -230,8 +338,36 @@ def place_bubbles(
                     y=by,
                     w=w_norm,
                     h=h_norm,
-                    occlusion_score=0.0,  # will be updated with image analysis
+                    occlusion_score=0.0,
+                    tail_direction=tail_dir,
                 )
             )
+
+    # ---- VLM face-aware optimization ----
+    for panel, bbox in zip(panels, panel_bboxes, strict=False):
+        faces = faces_by_panel.get(panel.panel_id)
+        if not faces:
+            continue
+        # Extract bubbles belonging to this panel
+        panel_bubbles = [b for b in all_bubbles if b.panel_id == panel.panel_id]
+        if not panel_bubbles:
+            continue
+        from .face_detector import FaceRegion, optimize_bubble_positions
+        face_regions = [
+            FaceRegion(x=f.x, y=f.y, w=f.w, h=f.h, char_name=f.char_name)
+            if hasattr(f, 'x') else
+            FaceRegion(
+                x=float(f.get("x", 0)), y=float(f.get("y", 0)),
+                w=float(f.get("w", 0)), h=float(f.get("h", 0)),
+                char_name=str(f.get("char_name", "")),
+            )
+            for f in faces
+        ]
+        optimized = optimize_bubble_positions(panel_bubbles, face_regions, bbox)
+        # Replace in-place
+        for i, b in enumerate(all_bubbles):
+            for ob in optimized:
+                if b.panel_id == ob.panel_id and b.dialogue_index == ob.dialogue_index:
+                    all_bubbles[i] = ob
 
     return all_bubbles

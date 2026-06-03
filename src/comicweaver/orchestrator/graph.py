@@ -19,7 +19,6 @@ from comicweaver.agents import (
     CharacterAgent,
     ImageAgent,
     LayoutAgent,
-    ReviewerAgent,
     ScriptAgent,
     StoryboardAgent,
 )
@@ -37,9 +36,6 @@ from comicweaver.core import (
     LayoutInput,
     PageLayout,
     PanelImage,
-    ReviewDecision,
-    ReviewFeedback,
-    ReviewInput,
     Scene,
     ScriptInput,
     StoryboardInput,
@@ -49,142 +45,20 @@ from comicweaver.utils.logging import (
     log_agent_error,
     log_agent_input,
     log_agent_output,
-    log_checkpoint,
     log_comfyui_request,
     log_comfyui_response,
     log_fallback,
     log_performance,
-    log_review,
     log_state_change,
     log_workflow_event,
     summarize_character_output,
     summarize_image_output,
     summarize_layout_output,
-    summarize_review_output,
     summarize_script_output,
     summarize_storyboard_output,
 )
 
-from .types import CheckpointSignal, WorkflowEvent, WorkflowMessage, should_pause
-
-# ============================================================================
-# 条件路由辅助函数
-# ============================================================================
-
-
-def _make_route_checkpoint(checkpoint_id: str):
-    """创建条件边路由函数 —— 判断是否需要进入确认节点。"""
-
-    def route(state: ComicState) -> str:
-        if should_pause(state, checkpoint_id):
-            return "checkpoint"
-        return "continue"
-
-    return route
-
-
-def _make_retry_route(agent_name: str, checkpoint_id: str, max_retries: int = 3):
-    """创建条件边路由函数 —— 含 REVISE 重试 + checkpoint 判断。
-
-    逻辑：
-    1. 最后一条 review_result 的 agent 匹配且 decision == "revise"
-       → 检查 retry_count < max_retries → "retry"（回到生产节点）
-    2. 否则按 checkpoint 模式判断 → "checkpoint" 或 "continue"
-    """
-
-    def route(state: ComicState) -> str:
-        review_results = state.get("review_results", [])
-        if review_results:
-            last = review_results[-1]
-            if last.get("agent") == agent_name and last.get("decision") == "revise":
-                retry_count = state.get("retry_counts", {}).get(agent_name, 0)
-                if retry_count <= max_retries:
-                    return "retry"
-        if should_pause(state, checkpoint_id):
-            return "checkpoint"
-        return "continue"
-
-    return route
-
-
-# ============================================================================
-# Checkpoint 信息构建
-# ============================================================================
-
-
-def _build_checkpoint_payload(state: ComicState, checkpoint_id: str) -> dict:
-    """根据当前 state 构建确认节点的预览信息。"""
-    payloads: dict[str, dict] = {
-        "after_script": {
-            "title": state.get("structured_script", {}).get("title"),
-            "scene_count": len(state.get("structured_script", {}).get("scenes", [])),
-            "characters": [
-                c.get("name")
-                for c in state.get("structured_script", {}).get("characters", [])
-            ],
-        },
-        "after_character": {
-            "characters": list(
-                (state.get("character_db") or {}).get("characters", {}).keys()
-            ),
-        },
-        "after_storyboard": {
-            "pages": len(state.get("storyboard_plan", [])),
-            "panels": sum(
-                len(p.get("panels", []))
-                for p in state.get("storyboard_plan", [])
-            ),
-        },
-        "after_layout": {
-            "pages": [p.get("image_path") for p in state.get("final_pages", [])],
-        },
-    }
-    return payloads.get(checkpoint_id, {})
-
-
-_CHECKPOINT_LABELS: dict[str, str] = {
-    "after_script": "剧本结构确认",
-    "after_character": "角色设计确认",
-    "after_storyboard": "分镜规划确认",
-    "after_layout": "最终漫画确认",
-}
-
-
-def _make_checkpoint_node(checkpoint_id: str):
-    """创建 LangGraph 确认节点 —— 调用 interrupt() 暂停工作流。"""
-
-    def node(state: ComicState) -> ComicState:
-        label = _CHECKPOINT_LABELS.get(checkpoint_id, checkpoint_id)
-        payload = _build_checkpoint_payload(state, checkpoint_id)
-        signal = CheckpointSignal(
-            checkpoint_id=checkpoint_id,
-            label=label,
-            payload=payload,
-        )
-
-        # 使用 LangGraph interrupt 暂停工作流
-        decision = interrupt(signal)
-
-        # 开发者日志：确认点交互
-        writer = get_stream_writer()
-        writer(log_checkpoint(checkpoint_id, decision))
-
-        # 记录用户决策（resume 后由 LangGraph 状态管理持久化）
-        state.setdefault("user_decisions", []).append({
-            "checkpoint": checkpoint_id,
-            "decision": decision,
-        })
-        state["pending_checkpoint"] = None
-
-        return state
-
-    return node
-
-
-# ============================================================================
-# ComicWorkflow —— 基于 LangGraph 的工作流执行器
-# ============================================================================
-
+from .types import WorkflowEvent, WorkflowMessage
 
 class ComicWorkflow:
     """漫画创作工作流执行器（基于 LangGraph StateGraph）。
@@ -205,7 +79,6 @@ class ComicWorkflow:
         self.storyboard_agent = StoryboardAgent()
         self.image_agent = ImageAgent()
         self.layout_agent = LayoutAgent()
-        self.reviewer = ReviewerAgent()
 
         # 构建并编译 LangGraph 图
         self._graph = self._build_graph()
@@ -222,68 +95,26 @@ class ComicWorkflow:
         return self._response_queue
 
     # ------------------------------------------------------------------
-    # 图构建
+    # 图构建（简化版 — 无审查 Agent，线性流水线）
     # ------------------------------------------------------------------
 
     def _build_graph(self) -> StateGraph:
         builder = StateGraph(ComicState)
 
-        # -- 生产节点 --
+        # -- 5 个生产节点，线性串联 --
         builder.add_node("script", self._node_script)
         builder.add_node("character", self._node_character)
         builder.add_node("storyboard", self._node_storyboard)
         builder.add_node("image", self._node_image)
         builder.add_node("layout", self._node_layout)
 
-        # -- 审查节点 --
-        builder.add_node("review_script", self._node_review_script)
-        builder.add_node("review_character", self._node_review_character)
-        builder.add_node("review_storyboard", self._node_review_storyboard)
-        builder.add_node("review_layout", self._node_review_layout)
-
-        # -- 确认节点 --
-        builder.add_node("checkpoint_script", _make_checkpoint_node("after_script"))
-        builder.add_node("checkpoint_character", _make_checkpoint_node("after_character"))
-        builder.add_node("checkpoint_storyboard", _make_checkpoint_node("after_storyboard"))
-        builder.add_node("checkpoint_layout", _make_checkpoint_node("after_layout"))
-
-        # -- 边：script → review → [retry|checkpoint|continue] --
+        # -- 边：START → script → character → storyboard → image → layout → END --
         builder.add_edge(START, "script")
-        builder.add_edge("script", "review_script")
-        builder.add_conditional_edges(
-            "review_script",
-            _make_retry_route("script_agent", "after_script"),
-            {"retry": "script", "checkpoint": "checkpoint_script", "continue": "character"},
-        )
-        builder.add_edge("checkpoint_script", "character")
-
-        # -- 边：character → review → [retry|checkpoint|continue] --
-        builder.add_edge("character", "review_character")
-        builder.add_conditional_edges(
-            "review_character",
-            _make_retry_route("character_agent", "after_character"),
-            {"retry": "character", "checkpoint": "checkpoint_character", "continue": "storyboard"},
-        )
-        builder.add_edge("checkpoint_character", "storyboard")
-
-        # -- 边：storyboard → review → [retry|checkpoint|continue] --
-        builder.add_edge("storyboard", "review_storyboard")
-        builder.add_conditional_edges(
-            "review_storyboard",
-            _make_retry_route("storyboard_agent", "after_storyboard"),
-            {"retry": "storyboard", "checkpoint": "checkpoint_storyboard", "continue": "image"},
-        )
-        builder.add_edge("checkpoint_storyboard", "image")
-
-        # -- 边：image → layout → review → [retry|checkpoint|continue] --
+        builder.add_edge("script", "character")
+        builder.add_edge("character", "storyboard")
+        builder.add_edge("storyboard", "image")
         builder.add_edge("image", "layout")
-        builder.add_edge("layout", "review_layout")
-        builder.add_conditional_edges(
-            "review_layout",
-            _make_retry_route("layout_agent", "after_layout"),
-            {"retry": "layout", "checkpoint": "checkpoint_layout", "continue": END},
-        )
-        builder.add_edge("checkpoint_layout", END)
+        builder.add_edge("layout", END)
 
         return builder
 
@@ -600,205 +431,41 @@ class ComicWorkflow:
         return state
 
     # ------------------------------------------------------------------
-    # 审查节点实现
-    # ------------------------------------------------------------------
-
-    async def _node_review_script(self, state: ComicState) -> ComicState:
-        return await self._run_review(
-            state, "script_agent", "rubric_script_v1",
-            target_output=state.get("structured_script", {}),
-        )
-
-    async def _node_review_character(self, state: ComicState) -> ComicState:
-        return await self._run_review(
-            state, "character_agent", "rubric_character_v1",
-            target_output=state.get("character_db", {}),
-        )
-
-    async def _node_review_storyboard(self, state: ComicState) -> ComicState:
-        return await self._run_review(
-            state, "storyboard_agent", "rubric_storyboard_v1",
-            target_output={
-                "pages": state.get("storyboard_plan", []),
-                "total_panels": sum(
-                    len(p.get("panels", []))
-                    for p in state.get("storyboard_plan", [])
-                ),
-            },
-        )
-
-    async def _node_review_layout(self, state: ComicState) -> ComicState:
-        return await self._run_review(
-            state, "layout_agent", "rubric_layout_v1",
-            target_output={
-                "final_pages": state.get("final_pages", []),
-                "overall_metrics": {"bubbles_overflow_count": 0},
-            },
-        )
-
-    async def _run_review(
-        self,
-        state: ComicState,
-        target_agent: str,
-        target_rubric_id: str,
-        target_output: dict,
-    ) -> ComicState:
-        """对生产 Agent 的输出执行审查并更新 state。"""
-        t0 = time.perf_counter()
-        writer = get_stream_writer()
-        ctx = self._make_context(state)
-        retry_counts = state.get("retry_counts", {})
-        retry = int(retry_counts.get(target_agent, 0))
-
-        review_input = ReviewInput(
-            target_agent=target_agent,
-            target_rubric_id=target_rubric_id,
-            target_output=target_output,
-            retry_count=retry,
-            max_retries=3,
-        )
-
-        # 开发者日志：审查输入
-        writer(log_agent_input(f"reviewer({target_agent})", {
-            "target_agent": target_agent,
-            "rubric_id": target_rubric_id,
-            "retry_count": retry,
-            "max_retries": 3,
-            "target_keys": list(target_output.keys())[:10],
-        }))
-
-        result: dict[str, Any] = {}
-        async for evt in self.reviewer.astream(review_input, ctx):
-            writer(evt)
-            if evt.type == StreamEventType.DONE and evt.content:
-                result = evt.content
-                writer(log_agent_output(f"reviewer({target_agent})",
-                    summarize_review_output(evt.content)))
-
-        if not result:
-            return state
-
-        feedback = ReviewFeedback.model_validate(result.get("feedback", {}))
-        review_log = state.setdefault("review_results", [])
-        review_log.append({
-            "agent": target_agent,
-            "decision": feedback.decision.value,
-            "score": feedback.overall_score,
-            "issues": feedback.issues,
-        })
-
-        # 开发者日志：审查决策
-        writer(log_review(
-            target_agent,
-            feedback.decision.value,
-            feedback.overall_score,
-            dimension_scores=feedback.dimension_scores,
-            issues=feedback.issues,
-        ))
-
-        if feedback.decision == ReviewDecision.PASS:
-            writer(WorkflowMessage(
-                WorkflowEvent.REVIEW_PASS, target_agent,
-                {"score": feedback.overall_score},
-            ))
-        elif feedback.decision == ReviewDecision.REVISE:
-            retry_counts[target_agent] = retry + 1
-            state["retry_counts"] = retry_counts
-            writer(WorkflowMessage(
-                WorkflowEvent.REVIEW_REVISE, target_agent,
-                {"score": feedback.overall_score, "issues": feedback.issues},
-            ))
-        else:
-            writer(WorkflowMessage(
-                WorkflowEvent.REVIEW_ESCALATE, target_agent,
-                {
-                    "score": feedback.overall_score,
-                    "summary": result.get("escalation_summary"),
-                },
-            ))
-
-        elapsed = (time.perf_counter() - t0) * 1000
-        writer(log_performance(f"reviewer({target_agent})", elapsed))
-        return state
-
-    # ------------------------------------------------------------------
     # 公共入口
     # ------------------------------------------------------------------
 
     async def arun(self, state: ComicState) -> AsyncIterator[object]:
-        """异步执行工作流，流式吐出消息（向后兼容的接口）。
+        """异步执行工作流，流式吐出消息。
 
-        内部使用 LangGraph astream 驱动节点执行。
-        当遇到 interrupt() 确认点时暂停，等待 respond() 后继续。
+        简化的线性流水线（无审查/确认），5 个 Agent 顺序执行。
         """
         workflow_t0 = time.perf_counter()
         yield WorkflowMessage(WorkflowEvent.NODE_START, "workflow")
-        yield log_workflow_event("工作流启动", f"project={state.get('project_id', '?')}, mode={state.get('interaction_mode', '?')}")
+        yield log_workflow_event("工作流启动", f"project={state.get('project_id', '?')}")
 
         config: dict[str, Any] = {
             "configurable": {"thread_id": state.get("project_id", "default")}
         }
         self._current_config = config
-        input_data: Any = state  # 初始输入为完整 state
         prev_phase = state.get("current_phase", "init")
 
         try:
-            while True:
-                # 执行图直到下一个 interrupt 或 END
-                async for mode, data in self._compiled.astream(
-                    input_data, config, stream_mode=["custom", "updates"]
-                ):
-                    if mode == "custom":
-                        yield data
-                    elif mode == "updates":
-                        # langgraph 内部的 __interrupt__ 标记跳过
-                        if "__interrupt__" in data:
-                            continue
-                        # 将节点返回的更新合并到本地 state
-                        for _node_name, node_update in data.items():
-                            if isinstance(node_update, dict):
-                                for key, value in node_update.items():
-                                    state[key] = value  # type: ignore[literal-required]
-                                # 检测阶段变更
-                                new_phase = node_update.get("current_phase")
-                                if new_phase and new_phase != prev_phase:
-                                    yield log_state_change(prev_phase, new_phase)
-                                    prev_phase = new_phase
-
-                # 检查是否需要处理 interrupt
-                snapshot = self._compiled.get_state(config)
-                if snapshot is None or snapshot.next == ():
-                    break  # 工作流完成
-
-                if snapshot.interrupts:
-                    interrupt_value = snapshot.interrupts[0].value
-                    if isinstance(interrupt_value, CheckpointSignal):
-                        # 将确认信息写入 state（供 UI 读取）
-                        state["pending_checkpoint"] = {
-                            "id": interrupt_value.checkpoint_id,
-                            "label": interrupt_value.label,
-                            "payload": interrupt_value.payload,
-                        }
-                        # 向 UI 发送确认信号
-                        yield interrupt_value
-
-                        # 等待用户响应（线程安全）
-                        # 注意：user_decisions 由 checkpoint 节点在 resume 后记录
-                        self._loop_for_response = asyncio.get_running_loop()
-                        queue = self._ensure_queue()
-                        decision = await queue.get()
-
-                        if decision == "skip":
-                            # 中止工作流
-                            yield log_workflow_event("工作流中止", f"用户在 {interrupt_value.checkpoint_id} 选择了 skip")
-                            return
-
-                        # 用 Command(resume=...) 继续执行
-                        input_data = Command(resume=decision)
-                    else:
-                        break
-                else:
-                    break
+            async for mode, data in self._compiled.astream(
+                state, config, stream_mode=["custom", "updates"]
+            ):
+                if mode == "custom":
+                    yield data
+                elif mode == "updates":
+                    if "__interrupt__" in data:
+                        continue
+                    for _node_name, node_update in data.items():
+                        if isinstance(node_update, dict):
+                            for key, value in node_update.items():
+                                state[key] = value  # type: ignore[literal-required]
+                            new_phase = node_update.get("current_phase")
+                            if new_phase and new_phase != prev_phase:
+                                yield log_state_change(prev_phase, new_phase)
+                                prev_phase = new_phase
 
         except Exception as exc:  # noqa: BLE001
             yield log_agent_error("workflow", str(exc),
@@ -813,25 +480,8 @@ class ComicWorkflow:
         yield log_performance("workflow(total)", total_elapsed)
         yield log_workflow_event("工作流完成",
             f"耗时 {total_elapsed:.0f}ms, "
-            f"reviews={len(state.get('review_results', []))}, "
             f"pages={len(state.get('final_pages', []))}")
         yield WorkflowMessage(WorkflowEvent.WORKFLOW_DONE, "workflow", state)
-
-    def respond(self, decision: str) -> None:
-        """用户响应当前确认点。decision: accept | regenerate | skip
-
-        线程安全 —— 可从任意线程调用。
-        """
-        queue = self._ensure_queue()
-        if self._loop_for_response and self._loop_for_response.is_running():
-            self._loop_for_response.call_soon_threadsafe(
-                queue.put_nowait, decision
-            )
-        else:
-            try:
-                queue.put_nowait(decision)
-            except Exception:  # noqa: BLE001
-                pass
 
     # ------------------------------------------------------------------
     # 辅助方法

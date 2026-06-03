@@ -5,6 +5,7 @@ can be used by pointing base_url at their compatible endpoint.
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import time
@@ -16,7 +17,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .config import ImageConfig, LLMConfig
+from .config import ImageConfig, LLMConfig, VLMConfig
 from .storage.paths import project_dir
 
 logger = logging.getLogger("comicweaver.comfyui")
@@ -41,7 +42,18 @@ class ApiBackendError(RuntimeError):
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: str | list[dict[str, Any]]  # str for text; list for vision content array
+
+
+def encode_image_base64(image_path: str) -> str:
+    """Read an image file and return a base64 data-URI string."""
+    with open(image_path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("ascii")
+    # Try to detect mime type from extension
+    ext = Path(image_path).suffix.lower()
+    mime_map = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
+    mime = mime_map.get(ext, "image/png")
+    return f"data:{mime};base64,{b64}"
 
 
 class ChatCompletionRequest(BaseModel):
@@ -425,3 +437,111 @@ class ComfyUIImageClient:
                 return resp.read()
         except urllib.error.URLError as exc:
             raise ApiBackendError(f"Image download failed: {exc}") from exc
+
+
+# ============================================================================
+# Standalone VLM utilities (independent of OpenAICompatibleLLMClient)
+# ============================================================================
+
+
+def _vlm_completion_url(base_url: str) -> str:
+    """Build the /chat/completions URL from a base URL."""
+    base = base_url.rstrip("/")
+    if base.endswith("/chat/completions"):
+        return base
+    return f"{base}/chat/completions"
+
+
+def _vlm_post_json(url: str, payload: dict[str, Any], api_key: str, timeout: float) -> dict[str, Any]:
+    """POST JSON to an OpenAI-compatible endpoint, returning the parsed response."""
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        url, data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as resp:
+            raw = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.URLError as exc:
+        raise ApiBackendError(f"VLM API request failed: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ApiBackendError("VLM API returned a non-object response")
+    return raw
+
+
+def detect_faces_vlm_api(image_path: str, config: VLMConfig) -> list[dict[str, Any]]:
+    """Use a vision-capable LLM to find character faces in a panel image.
+
+    Takes a **VLMConfig** (separate from LLMConfig).  Returns a list of dicts:
+        [{"char_name": "林染", "bbox": {"x": 0.3, "y": 0.2, "w": 0.15, "h": 0.2}}, ...]
+
+    All bbox values are normalised [0, 1] relative to image dimensions.
+    Returns an empty list if VLM is unavailable, fails, or finds nothing.
+    """
+    if not config.is_available:
+        return []
+
+    data_uri = encode_image_base64(image_path)
+
+    system_prompt = (
+        "You are a precise visual analysis tool. Your ONLY job is to detect "
+        "character faces in a manga/comic panel image. Output valid JSON.\n\n"
+        "RULES:\n"
+        "1. Identify every visible character face.\n"
+        "2. For each face, return a normalised bounding box: x, y, w, h in [0, 1].\n"
+        "   x=0 means left edge, x=1 means right edge. y=0 means top, y=1 means bottom.\n"
+        "3. If you can guess which character it is, include char_name.\n"
+        "4. If NO faces are visible, return an empty list.\n"
+        "5. Output ONLY the JSON array, no markdown, no extra text.\n"
+        'Example: [{"char_name": "hero", "bbox": {"x": 0.3, "y": 0.2, "w": 0.15, "h": 0.25}}]'
+    )
+
+    messages = [
+        ChatMessage(role="system", content=system_prompt),
+        ChatMessage(
+            role="user",
+            content=[
+                {"type": "text", "text": "Find all character faces in this panel. Return JSON array."},
+                {"type": "image_url", "image_url": {"url": data_uri}},
+            ],
+        ),
+    ]
+
+    req = ChatCompletionRequest(
+        model=config.model,
+        messages=messages,
+        temperature=config.temperature,
+        max_tokens=config.max_tokens,
+    )
+    req.response_format = None  # no json_object for vision models
+
+    request_payload = req.model_dump(exclude_none=True)
+    try:
+        started = time.time()
+        raw = _vlm_post_json(
+            _vlm_completion_url(config.base_url),
+            request_payload,
+            config.api_key,
+            config.timeout_seconds,
+        )
+        choices = raw.get("choices") or []
+        if not choices:
+            return []
+        content = (choices[0].get("message") or {}).get("content") or ""
+        response = ChatCompletionResponse(
+            content=content, raw=raw,
+            latency_ms=int((time.time() - started) * 1000),
+        )
+        result = response.json_content()
+        if isinstance(result, list):
+            return result
+        for v in result.values():
+            if isinstance(v, list):
+                return v
+        return []
+    except Exception:
+        return []  # graceful fallback — VLM failure should never crash

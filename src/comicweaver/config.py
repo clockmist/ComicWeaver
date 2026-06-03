@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 
 class LLMConfig(BaseModel):
+    """Text-only LLM backend (script, storyboard, review, character tags)."""
     provider: str = "local"
     base_url: str = ""
     api_key: str = ""
@@ -23,6 +24,27 @@ class LLMConfig(BaseModel):
     temperature: float = 0.3
     max_tokens: int = 4096
     timeout_seconds: float = 60.0
+
+    @property
+    def is_available(self) -> bool:
+        return self.enabled and bool(self.base_url and self.api_key and self.model)
+
+
+class VLMConfig(BaseModel):
+    """Vision-capable LLM backend (face detection, bubble placement, image QA).
+
+    Shares the same API shape as LLMConfig (OpenAI-compatible /chat/completions)
+    but may point to a different provider/model optimized for vision tasks.
+    When *enabled* is false or fields are empty, callers fall back to heuristics.
+    """
+    provider: str = "local"
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+    enabled: bool = False
+    temperature: float = 0.1
+    max_tokens: int = 1024
+    timeout_seconds: float = 30.0
 
     @property
     def is_available(self) -> bool:
@@ -57,6 +79,7 @@ class RuntimeConfig(BaseModel):
 
 class AppConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    vlm: VLMConfig = Field(default_factory=VLMConfig)
     image: ImageConfig = Field(default_factory=ImageConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
@@ -102,6 +125,7 @@ def _set_nested(data: dict[str, Any], dotted_key: str, value: Any) -> None:
 
 def _apply_env(data: dict[str, Any]) -> None:
     mapping: dict[str, tuple[str, Any]] = {
+        # LLM (text-only)
         "COMICWEAVER_LLM_PROVIDER": ("llm.provider", str),
         "COMICWEAVER_LLM_BASE_URL": ("llm.base_url", str),
         "COMICWEAVER_LLM_API_KEY": ("llm.api_key", str),
@@ -110,6 +134,16 @@ def _apply_env(data: dict[str, Any]) -> None:
         "COMICWEAVER_LLM_TEMPERATURE": ("llm.temperature", float),
         "COMICWEAVER_LLM_MAX_TOKENS": ("llm.max_tokens", int),
         "COMICWEAVER_LLM_TIMEOUT_SECONDS": ("llm.timeout_seconds", float),
+        # VLM (vision)
+        "COMICWEAVER_VLM_PROVIDER": ("vlm.provider", str),
+        "COMICWEAVER_VLM_BASE_URL": ("vlm.base_url", str),
+        "COMICWEAVER_VLM_API_KEY": ("vlm.api_key", str),
+        "COMICWEAVER_VLM_MODEL": ("vlm.model", str),
+        "COMICWEAVER_VLM_ENABLED": ("vlm.enabled", _coerce_bool),
+        "COMICWEAVER_VLM_TEMPERATURE": ("vlm.temperature", float),
+        "COMICWEAVER_VLM_MAX_TOKENS": ("vlm.max_tokens", int),
+        "COMICWEAVER_VLM_TIMEOUT_SECONDS": ("vlm.timeout_seconds", float),
+        # Image
         "COMICWEAVER_IMAGE_PROVIDER": ("image.provider", str),
         "COMICWEAVER_IMAGE_SERVER_URL": ("image.server_url", str),
         "COMICWEAVER_IMAGE_MODEL": ("image.model", str),
@@ -118,9 +152,11 @@ def _apply_env(data: dict[str, Any]) -> None:
         "COMICWEAVER_IMAGE_CHARACTER_WORKFLOW": ("image.workflow_character_path", str),
         "COMICWEAVER_IMAGE_PANEL_WORKFLOW": ("image.workflow_panel_path", str),
         "COMICWEAVER_IMAGE_FALLBACK": ("image.fallback_to_placeholder", _coerce_bool),
+        # Storage
         "COMICWEAVER_PROJECTS_DIR": ("storage.projects_dir", str),
         "COMICWEAVER_CACHE_DIR": ("storage.cache_dir", str),
         "COMICWEAVER_OUTPUTS_DIR": ("storage.outputs_dir", str),
+        # Runtime
         "COMICWEAVER_FALLBACK_TO_LOCAL": ("runtime.fallback_to_local", _coerce_bool),
         "COMICWEAVER_REQUEST_RETRIES": ("runtime.request_retries", int),
     }

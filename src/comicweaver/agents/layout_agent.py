@@ -38,6 +38,7 @@ from .layout import (
     place_bubbles,
     solve_layout,
 )
+from .layout.face_detector import detect_faces_vlm, optimize_bubble_positions
 from .layout.solver import apply_gutters
 from .layout.templates import LayoutHint
 
@@ -60,17 +61,31 @@ class LayoutAgent(BaseAgent[LayoutInput, LayoutOutput]):
     async def run(self, inputs: LayoutInput, context: AgentContext) -> LayoutOutput:
         await self._sleep_for_demo(0.2)
 
-        if self.config.llm.is_available:
-            # Future: LLM quality-assessment path
-            # For now, fall through to algorithmic
-            pass
+        # Pre-detect faces via VLM (async, parallel per panel)
+        faces_by_panel: dict[str, list] = {}
+        if self.config.vlm.is_available:
+            for page in inputs.pages:
+                for panel in page.panels:
+                    pi = inputs.panel_images.get(panel.panel_id)
+                    if pi and panel.dialogues_in_panel:
+                        try:
+                            face_data = await detect_faces_vlm(
+                                pi.image_path, self.config.vlm,
+                            )
+                            if face_data:
+                                faces_by_panel[panel.panel_id] = face_data
+                        except Exception:
+                            pass  # VLM failure → skip, use heuristic positioning
 
-        return self._run_algorithmic(inputs, context)
+        return self._run_algorithmic(inputs, context, faces_by_panel)
 
     def _run_algorithmic(
         self, inputs: LayoutInput, context: AgentContext,
+        faces_by_panel: dict[str, list] | None = None,
     ) -> LayoutOutput:
-        """Pure-algorithm layout pipeline."""
+        """Algorithmic layout pipeline (optionally VLM-face-aware)."""
+        if faces_by_panel is None:
+            faces_by_panel = {}
         geometry = PageGeometry(
             width_px=inputs.page_width_px,
             height_px=inputs.page_height_px,
@@ -100,6 +115,10 @@ class LayoutAgent(BaseAgent[LayoutInput, LayoutOutput]):
             bubbles = place_bubbles(
                 page.panels, bboxes, inputs.panel_images,
                 font_size_pt=inputs.font_config.base_size_pt,
+                page_width_px=inputs.page_width_px,
+                page_height_px=inputs.page_height_px,
+                margin_px=inputs.margin_px,
+                faces_by_panel=faces_by_panel,
             )
 
             # ---- Step 5: composite the page image ----
@@ -121,6 +140,7 @@ class LayoutAgent(BaseAgent[LayoutInput, LayoutOutput]):
                 panel_slots=panel_slots,
                 panel_images=inputs.panel_images,
                 bubbles=bubbles,
+                font_size_pt=inputs.font_config.base_size_pt,
                 width_px=inputs.page_width_px,
                 height_px=inputs.page_height_px,
                 margin_px=inputs.margin_px,

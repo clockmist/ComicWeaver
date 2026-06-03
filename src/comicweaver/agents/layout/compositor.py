@@ -9,6 +9,7 @@ which is being removed from the storage layer.
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 from dataclasses import dataclass
 from enum import Enum
@@ -228,6 +229,7 @@ def compose_page(
     width_px: int = 1240,
     height_px: int = 1754,
     margin_px: int = 40,
+    font_size_pt: int = 14,
     border_color: tuple[int, int, int] = (20, 20, 20),
     border_width: int = 3,
     bg_color: tuple[int, int, int] = (250, 250, 250),
@@ -314,7 +316,7 @@ def compose_page(
         )
 
     # --- Render dialogue bubbles ---
-    _render_bubbles(draw, bubbles, margin_px, inner_w, inner_h, bg_color)
+    _render_bubbles(draw, bubbles, margin_px, inner_w, inner_h, bg_color, font_size_pt)
 
     # --- Page number ---
     num_font = _safe_font(20)
@@ -354,6 +356,10 @@ def _draw_placeholder(
 # Bubble rendering
 # ---------------------------------------------------------------------------
 
+_TAIL_SIZE = 12    # pixels – tail triangle size
+_THOUGHT_DOT_R = 5  # pixels – thought-bubble dot radius
+
+
 def _render_bubbles(
     draw: ImageDraw.ImageDraw,
     bubbles: list["BubblePlacement"],
@@ -361,71 +367,390 @@ def _render_bubbles(
     inner_w: int,
     inner_h: int,
     bg_color: tuple[int, int, int],
+    font_size_pt: int = 14,
 ) -> None:
-    """Draw all dialogue bubbles onto the page."""
-    speaker_font = _safe_font(18)
-    text_font = _safe_font(15)
-
+    """Dispatch each bubble to its type-specific renderer."""
     for bp in bubbles:
         bx = margin_px + int(inner_w * bp.x)
         by = margin_px + int(inner_h * bp.y)
         bw = int(inner_w * bp.w)
         bh = int(inner_h * bp.h)
+        body = (bx, by, bx + bw, by + bh)
 
-        # Bubble background based on type
-        if bp.bubble_type == "narration":
-            # Narration box – square, no tail
-            draw.rectangle(
-                (bx, by, bx + bw, by + bh),
-                fill=(255, 255, 240),
-                outline=(80, 80, 80),
-                width=2,
-            )
-        elif bp.bubble_type == "thought":
-            # Thought bubble – rounded with lighter border
-            draw.rounded_rectangle(
-                (bx, by, bx + bw, by + bh),
-                radius=16,
-                fill=(255, 255, 255),
-                outline=(180, 180, 200),
-                width=2,
-            )
+        if bp.bubble_type == "thought":
+            _draw_thought(draw, body, bp, bg_color, font_size_pt)
         elif bp.bubble_type == "shout":
-            # Shout bubble – thicker outline, warm tint
-            draw.rounded_rectangle(
-                (bx, by, bx + bw, by + bh),
-                radius=8,
-                fill=(255, 255, 240),
-                outline=(200, 40, 40),
-                width=3,
-            )
+            _draw_shout(draw, body, bp, bg_color, font_size_pt)
+        elif bp.bubble_type == "whisper":
+            _draw_whisper(draw, body, bp, bg_color, font_size_pt)
+        elif bp.bubble_type == "narration":
+            _draw_narration(draw, body, bp, font_size_pt)
         else:  # "speech" or unknown
-            draw.rounded_rectangle(
-                (bx, by, bx + bw, by + bh),
-                radius=12,
-                fill=(255, 255, 255),
-                outline=(20, 20, 20),
-                width=2,
-            )
+            _draw_speech(draw, body, bp, font_size_pt)
 
-        # Speaker label
-        if bp.speaker:
-            draw.text(
-                (bx + 10, by + 8),
-                f"{bp.speaker}:",
-                fill=(40, 40, 80),
-                font=speaker_font,
-            )
 
-        # Dialogue text (wrapped)
-        text_offset_y = by + 32 if bp.speaker else by + 10
-        text_max_w = bw - 20
-        lines = _wrap_text(draw, bp.text, text_max_w, text_font)
-        line_h = text_font.size + 4 if hasattr(text_font, "size") else 18
-        for i, ln in enumerate(lines):
-            draw.text(
-                (bx + 10, text_offset_y + i * line_h),
-                ln,
-                fill=(30, 30, 30),
-                font=text_font,
-            )
+# ---------------------------------------------------------------------------
+# Speech bubble — rounded rectangle + triangular tail
+# ---------------------------------------------------------------------------
+
+def _tail_polygon(
+    body: tuple[int, int, int, int],
+    direction: str,
+) -> list[tuple[int, int]]:
+    """Return a 3-point polygon for the tail, given the bubble body rect.
+
+    The tail extends OUTWARD from the bubble edge, pointing toward the
+    panel centre (i.e., opposite to *direction* — if direction is "down_right"
+    the tail sits at the bottom-right corner of the bubble).
+    """
+    x1, y1, x2, y2 = body
+    cx = (x1 + x2) // 2
+    cy = (y1 + y2) // 2
+    ts = _TAIL_SIZE
+
+    # Map "where should tail point" → "which edge of bubble" + "triangle coords"
+    # Tail base sits on the bubble edge, tip extends outward.
+    if direction == "down":
+        return [(cx - ts, y2), (cx + ts, y2), (cx, y2 + ts)]
+    elif direction == "up":
+        return [(cx - ts, y1), (cx + ts, y1), (cx, y1 - ts)]
+    elif direction == "left":
+        return [(x1, cy - ts), (x1, cy + ts), (x1 - ts, cy)]
+    elif direction == "right":
+        return [(x2, cy - ts), (x2, cy + ts), (x2 + ts, cy)]
+    elif direction == "down_right":
+        return [(x2 - ts, y2), (x2, y2 - ts), (x2 + ts // 2, y2 + ts // 2)]
+    elif direction == "down_left":
+        return [(x1 + ts, y2), (x1, y2 - ts), (x1 - ts // 2, y2 + ts // 2)]
+    elif direction == "up_right":
+        return [(x2 - ts, y1), (x2, y1 + ts), (x2 + ts // 2, y1 - ts // 2)]
+    elif direction == "up_left":
+        return [(x1 + ts, y1), (x1, y1 + ts), (x1 - ts // 2, y1 - ts // 2)]
+    else:
+        # "auto" / fallback — tail at bottom edge
+        return [(cx - ts, y2), (cx + ts, y2), (cx, y2 + ts)]
+
+
+def _draw_speech(
+    draw: ImageDraw.ImageDraw,
+    body: tuple[int, int, int, int],
+    bp: "BubblePlacement",
+    font_size_pt: int = 14,
+) -> None:
+    """Rounded rectangle speech bubble with triangular tail."""
+    x1, y1, x2, y2 = body
+    tail = _tail_polygon(body, bp.tail_direction)
+
+    # Draw tail first (filled, no outline)
+    draw.polygon(tail, fill=(255, 255, 255))
+
+    # Bubble body
+    draw.rounded_rectangle(
+        (x1, y1, x2, y2), radius=12,
+        fill=(255, 255, 255), outline=(20, 20, 20), width=2,
+    )
+
+    # Tail outline — draw the two edges of the triangle that aren't on the bubble
+    _draw_tail_outline(draw, tail, body)
+
+    # Text
+    _draw_bubble_text(draw, bp, x1, y1, x2, y2, font_size_pt=font_size_pt)
+
+
+def _draw_tail_outline(
+    draw: ImageDraw.ImageDraw,
+    tail: list[tuple[int, int]],
+    body: tuple[int, int, int, int],
+) -> None:
+    """Draw thin lines for the two 'free' edges of the tail triangle."""
+    x1, y1, x2, y2 = body
+    for i in range(3):
+        a = tail[i]
+        b = tail[(i + 1) % 3]
+        # Skip edge if both endpoints lie on the bubble border
+        on_border_a = (a[0] == x1 or a[0] == x2 or a[1] == y1 or a[1] == y2)
+        on_border_b = (b[0] == x1 or b[0] == x2 or b[1] == y1 or b[1] == y2)
+        if not (on_border_a and on_border_b):
+            draw.line([a, b], fill=(20, 20, 20), width=2)
+
+
+# ---------------------------------------------------------------------------
+# Thought bubble — rounded rect + small circles (cloud outline)
+# ---------------------------------------------------------------------------
+
+def _draw_thought(
+    draw: ImageDraw.ImageDraw,
+    body: tuple[int, int, int, int],
+    bp: "BubblePlacement",
+    bg_color: tuple[int, int, int],
+    font_size_pt: int = 14,
+) -> None:
+    """Cloud-like thought bubble: rounded rect + circles along the bottom."""
+    x1, y1, x2, y2 = body
+    r = _THOUGHT_DOT_R
+    # Dot positions: leading from the bubble toward the panel centre
+    tail_dir = bp.tail_direction or "down"
+    dots = _thought_dot_positions(body, tail_dir)
+
+    # Draw dots
+    for (dx, dy) in dots:
+        draw.ellipse((dx - r, dy - r, dx + r, dy + r),
+                     fill=(255, 255, 255), outline=(180, 180, 200), width=1)
+
+    # Bubble body (draw after dots so it covers overlapping dot edges)
+    draw.rounded_rectangle(
+        (x1, y1, x2, y2), radius=16,
+        fill=(255, 255, 255), outline=(180, 180, 200), width=2,
+    )
+
+    _draw_bubble_text(draw, bp, x1, y1, x2, y2, font_size_pt=font_size_pt)
+
+
+def _thought_dot_positions(
+    body: tuple[int, int, int, int],
+    direction: str,
+) -> list[tuple[int, int]]:
+    """Compute (x, y) centres for 3 thought-bubble dots."""
+    x1, y1, x2, y2 = body
+    cx = (x1 + x2) // 2
+    gap = _THOUGHT_DOT_R * 3
+
+    if "down" in direction:
+        base_y = y2 + gap
+        base_x = cx - gap if "left" in direction else (cx + gap if "right" in direction else cx)
+        return [(base_x - gap, base_y), (base_x, base_y + gap // 2), (base_x + gap // 2, base_y + gap)]
+    elif "up" in direction:
+        base_y = y1 - gap
+        base_x = cx - gap if "left" in direction else (cx + gap if "right" in direction else cx)
+        return [(base_x - gap, base_y), (base_x, base_y - gap // 2), (base_x + gap // 2, base_y - gap)]
+    elif "left" in direction:
+        base_x = x1 - gap
+        return [(base_x, cy - gap), (base_x - gap // 2, cy), (base_x, cy + gap)]
+    else:
+        base_x = x2 + gap
+        return [(base_x, cy - gap), (base_x + gap // 2, cy), (base_x, cy + gap)]
+
+
+# ---------------------------------------------------------------------------
+# Shout bubble — jagged-edge polygon
+# ---------------------------------------------------------------------------
+
+def _draw_shout(
+    draw: ImageDraw.ImageDraw,
+    body: tuple[int, int, int, int],
+    bp: "BubblePlacement",
+    bg_color: tuple[int, int, int],
+    font_size_pt: int = 14,
+) -> None:
+    """Jagged / spiky shout bubble for intense dialogue."""
+    x1, y1, x2, y2 = body
+    # Generate jagged outline points
+    points = _jagged_outline(x1, y1, x2, y2, amplitude=6, frequency=8)
+    tail_pts = _tail_polygon(body, bp.tail_direction)
+
+    # Draw filled polygon (body + tail)
+    draw.polygon(points + tail_pts, fill=(255, 255, 240), outline=(200, 40, 40), width=2)
+
+    _draw_bubble_text(draw, bp, x1 + 6, y1 + 6, x2 - 6, y2 - 6, font_size_pt=font_size_pt)
+
+
+def _jagged_outline(
+    x1: int, y1: int, x2: int, y2: int,
+    amplitude: int = 6,
+    frequency: int = 8,
+) -> list[tuple[int, int]]:
+    """Generate a jagged polygon approximating a rectangle.
+
+    The edge is modulated by a sine wave, creating the spiky comic-shout look.
+    Returns points going clockwise: top → right → bottom → left.
+    """
+    pts: list[tuple[int, int]] = []
+    w, h = x2 - x1, y2 - y1
+
+    # Top edge (left → right)
+    for i in range(frequency):
+        t = i / frequency
+        x = x1 + int(w * t)
+        y = y1 + int(amplitude * math.sin(t * math.pi * frequency))
+        pts.append((x, y))
+
+    # Right edge (top → bottom)
+    for i in range(frequency):
+        t = i / frequency
+        x = x2 + int(amplitude * math.sin(t * math.pi * frequency + math.pi / 2))
+        y = y1 + int(h * t)
+        pts.append((x, y))
+
+    # Bottom edge (right → left)
+    for i in range(frequency):
+        t = i / frequency
+        x = x2 - int(w * t)
+        y = y2 + int(amplitude * math.sin(t * math.pi * frequency + math.pi))
+        pts.append((x, y))
+
+    # Left edge (bottom → top)
+    for i in range(frequency):
+        t = i / frequency
+        x = x1 + int(amplitude * math.sin(t * math.pi * frequency + 3 * math.pi / 2))
+        y = y2 - int(h * t)
+        pts.append((x, y))
+
+    return pts
+
+
+# ---------------------------------------------------------------------------
+# Whisper bubble — dashed-border rounded rectangle
+# ---------------------------------------------------------------------------
+
+def _draw_whisper(
+    draw: ImageDraw.ImageDraw,
+    body: tuple[int, int, int, int],
+    bp: "BubblePlacement",
+    bg_color: tuple[int, int, int],
+    font_size_pt: int = 14,
+) -> None:
+    """Dashed-border whisper bubble for quiet / secretive dialogue."""
+    x1, y1, x2, y2 = body
+    # Fill
+    draw.rounded_rectangle(
+        (x1, y1, x2, y2), radius=12,
+        fill=(250, 250, 255),
+    )
+    # Dashed outline — draw as short line segments
+    _draw_dashed_rounded_rect(draw, x1, y1, x2, y2, radius=12,
+                              dash_len=6, gap_len=4,
+                              color=(140, 140, 160), width=1)
+
+    _draw_bubble_text(draw, bp, x1, y1, x2, y2, text_color=(100, 100, 120), font_size_pt=font_size_pt)
+
+
+def _draw_dashed_rounded_rect(
+    draw: ImageDraw.ImageDraw,
+    x1: int, y1: int, x2: int, y2: int,
+    radius: int, dash_len: int, gap_len: int,
+    color: tuple[int, int, int], width: int,
+) -> None:
+    """Draw a rounded-rectangle outline with dash pattern.
+
+    Approximates the rounded rect as straight segments (top/right/bottom/left)
+    plus four 90° arcs at the corners.  Each is drawn as dashed lines.
+    """
+    # Straight segments: [ (start_x, start_y), (end_x, end_y) ]
+    segments = [
+        (x1 + radius, y1, x2 - radius, y1),           # top
+        (x2, y1 + radius, x2, y2 - radius),            # right
+        (x2 - radius, y2, x1 + radius, y2),            # bottom
+        (x1, y2 - radius, x1, y1 + radius),            # left
+    ]
+
+    for sx, sy, ex, ey in segments:
+        _draw_dashed_line(draw, sx, sy, ex, ey, dash_len, gap_len, color, width)
+
+    # Corner arcs — draw as dashed too
+    corners = [
+        (x2 - radius, y1 + radius),   # top-right
+        (x2 - radius, y2 - radius),   # bottom-right
+        (x1 + radius, y2 - radius),   # bottom-left
+        (x1 + radius, y1 + radius),   # top-left
+    ]
+    angles = [270, 0, 90, 180]  # start angles for each corner
+    for (cx, cy), start_angle in zip(corners, angles):
+        _draw_dashed_arc(draw, cx, cy, radius, start_angle, dash_len, gap_len, color, width)
+
+
+def _draw_dashed_line(
+    draw: ImageDraw.ImageDraw,
+    x1: int, y1: int, x2: int, y2: int,
+    dash_len: int, gap_len: int,
+    color: tuple[int, int, int], width: int,
+) -> None:
+    """Draw a straight dashed line from (x1,y1) to (x2,y2)."""
+    dx, dy = x2 - x1, y2 - y1
+    length = int(math.hypot(dx, dy))
+    if length < 2:
+        return
+    ux, uy = dx / length, dy / length
+    pos = 0
+    drawing = True
+    while pos < length:
+        seg_len = dash_len if drawing else gap_len
+        seg_len = min(seg_len, length - pos)
+        if drawing:
+            sx, sy = x1 + ux * pos, y1 + uy * pos
+            ex, ey = x1 + ux * (pos + seg_len), y1 + uy * (pos + seg_len)
+            draw.line([(sx, sy), (ex, ey)], fill=color, width=width)
+        pos += seg_len
+        drawing = not drawing
+
+
+def _draw_dashed_arc(
+    draw: ImageDraw.ImageDraw,
+    cx: int, cy: int, radius: int, start_angle: int,
+    dash_len: int, gap_len: int,
+    color: tuple[int, int, int], width: int,
+) -> None:
+    """Draw a 90° dashed arc centred at (cx, cy)."""
+    arc_len = int(math.pi / 2 * radius)  # quarter-circle length
+    steps = max(1, arc_len // (dash_len + gap_len))
+    for i in range(steps):
+        a1 = math.radians(start_angle + i * 90 / steps)
+        a2 = math.radians(start_angle + (i + 0.6) * 90 / steps)  # 0.6 for dash, 0.4 for gap
+        xa, ya = cx + radius * math.cos(a1), cy - radius * math.sin(a1)
+        xb, yb = cx + radius * math.cos(a2), cy - radius * math.sin(a2)
+        draw.line([(xa, ya), (xb, yb)], fill=color, width=width)
+
+
+# ---------------------------------------------------------------------------
+# Narration box — simple square (placeholder for future page-level rendering)
+# ---------------------------------------------------------------------------
+
+def _draw_narration(
+    draw: ImageDraw.ImageDraw,
+    body: tuple[int, int, int, int],
+    bp: "BubblePlacement",
+    font_size_pt: int = 14,
+) -> None:
+    """Simple narration box.  Kept as a stub for future enhancement."""
+    x1, y1, x2, y2 = body
+    draw.rectangle(
+        (x1, y1, x2, y2),
+        fill=(255, 255, 240),
+        outline=(80, 80, 80),
+        width=2,
+    )
+    _draw_bubble_text(draw, bp, x1, y1, x2, y2, text_color=(60, 60, 60))
+
+
+# ---------------------------------------------------------------------------
+# Shared text rendering
+# ---------------------------------------------------------------------------
+
+def _draw_bubble_text(
+    draw: ImageDraw.ImageDraw,
+    bp: "BubblePlacement",
+    x1: int, y1: int, x2: int, y2: int,
+    text_color: tuple[int, int, int] = (30, 30, 30),
+    font_size_pt: int = 14,
+) -> None:
+    """Render speaker label + wrapped dialogue text inside the bubble."""
+    speaker_font = _safe_font(font_size_pt + 4)
+    text_font = _safe_font(font_size_pt)
+
+    pad = 10
+    if bp.speaker:
+        draw.text(
+            (x1 + pad, y1 + 8), f"{bp.speaker}:",
+            fill=(40, 40, 80), font=speaker_font,
+        )
+        text_y = y1 + 32
+    else:
+        text_y = y1 + pad
+
+    text_max_w = (x2 - x1) - pad * 2
+    lines = _wrap_text(draw, bp.text, text_max_w, text_font)
+    line_h = text_font.size + 4 if hasattr(text_font, "size") else 18
+    for i, ln in enumerate(lines):
+        draw.text(
+            (x1 + pad, text_y + i * line_h), ln,
+            fill=text_color, font=text_font,
+        )
