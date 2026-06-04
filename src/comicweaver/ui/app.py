@@ -946,43 +946,40 @@ def save_current_project() -> str:
 # UI 构建
 # ============================================================================
 
-def build_ui() -> gr.Blocks:
-    with gr.Blocks(title="ComicWeaver", head="""
-        <script>
-        (function() {
-            // 辅助
-            function _findInput(wrapId) {
-                var wrap = document.getElementById(wrapId);
-                if (!wrap) return null;
-                return wrap.querySelector('textarea, input');
-            }
-            function _setNativeValue(field, value) {
-                var proto = field instanceof HTMLTextAreaElement
-                    ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-                var desc = Object.getOwnPropertyDescriptor(proto, 'value');
-                if (desc && desc.set) desc.set.call(field, value);
-                else field.value = value;
-                // 派发多种事件以确保 Gradio/Svelte 能检测到变更
-                field.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: value}));
-                field.dispatchEvent(new Event('change', {bubbles: true}));
-                field.focus();
-            }
+HEAD_HTML = """<script>
+(function() {
+    function _findInput(wrapId) {
+        var wrap = document.getElementById(wrapId);
+        if (!wrap) return null;
+        return wrap.querySelector('textarea, input');
+    }
+    function _setNativeValue(field, value) {
+        var proto = field instanceof HTMLTextAreaElement
+            ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        var desc = Object.getOwnPropertyDescriptor(proto, 'value');
+        if (desc && desc.set) desc.set.call(field, value);
+        else field.value = value;
+        field.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: value}));
+        field.dispatchEvent(new Event('change', {bubbles: true}));
+        field.focus();
+    }
+    document.addEventListener('click', function(e) {
+        var card = e.target.closest('.cw-project-card');
+        if (!card) return;
+        var pid = card.getAttribute('data-project-id');
+        if (!pid) return;
+        e.preventDefault();
+        var field = _findInput('open-project-id-input');
+        if (field) {
+            _setNativeValue(field, pid);
+        }
+    });
+})();
+</script>"""
 
-            // ===== 项目卡片点击 → 填入 ID 到输入框 =====
-            document.addEventListener('click', function(e) {
-                var card = e.target.closest('.cw-project-card');
-                if (!card) return;
-                var pid = card.getAttribute('data-project-id');
-                if (!pid) return;
-                e.preventDefault();
-                var field = _findInput('open-project-id-input');
-                if (field) {
-                    _setNativeValue(field, pid);
-                }
-            });
-        })();
-        </script>
-        """) as demo:
+
+def build_ui() -> gr.Blocks:
+    with gr.Blocks(title="ComicWeaver") as demo:
         # 头部
         gr.HTML("""
         <div class="cw-header">
@@ -1282,6 +1279,7 @@ def main() -> None:
         share=False,
         show_error=True,
         inbrowser=False,
+        head=HEAD_HTML,
         css=CUSTOM_CSS,
         allowed_paths=[str(Path.cwd())],
     )

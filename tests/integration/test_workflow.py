@@ -4,13 +4,27 @@ StoryAgent、CharacterAgent、ScriptAgent 需要真实 LLM/ComfyUI API，
 不在集成测试范围内。
 """
 import pytest
+from unittest.mock import patch
 
 from comicweaver.core import make_initial_state
 from comicweaver.orchestrator import ComicWorkflow, WorkflowEvent
 
 
 @pytest.mark.asyncio
-async def test_full_workflow_full_auto():
+async def test_full_workflow_full_auto(tmp_path):
+    # 将所有项目输出重定向到临时目录，防止污染真实 projects/
+    fake_root = tmp_path / "projects"
+    fake_root.mkdir()
+
+    with patch("comicweaver.storage.paths.projects_root", return_value=fake_root):
+        await _run_workflow_test()
+
+    # 测试结束后清理（确保不残留）
+    import shutil
+    shutil.rmtree(fake_root, ignore_errors=True)
+
+
+async def _run_workflow_test():
     """从 storyboard 阶段开始测试 storyboard→image→layout 链路。
 
     预填充 developed_story、character_db、structured_script（模拟前三个阶段已完成）。
