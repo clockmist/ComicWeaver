@@ -136,6 +136,7 @@ async def _consume_workflow(session: Session) -> None:
                     session.agent_start_time = time.time()
                     # 更新 current_phase
                     agent_to_phase = {
+                        "story_agent": "story",
                         "script_agent": "script", "character_agent": "character",
                         "storyboard_agent": "storyboard", "image_agent": "image",
                         "layout_agent": "layout",
@@ -239,7 +240,10 @@ async def _consume_workflow(session: Session) -> None:
                         # 同步更新 session.state：LangGraph 仅在节点返回时同步 state，
                         # 但 checkpoint 在节点返回前触发，故需在此提前写入
                         if session.state is not None:
-                            if agent_name == "script_agent":
+                            if agent_name == "story_agent":
+                                session.state["developed_story"] = content
+                                session.state["narrative_structure"] = content.get("narrative_structure", {})
+                            elif agent_name == "script_agent":
                                 session.state["structured_script"] = content
                                 session.state["emotion_curve"] = content.get("emotion_curve", [])
                             elif agent_name == "character_agent":
@@ -344,7 +348,8 @@ def create_project(
 # 阶段定义：顺序、前置依赖、需要清除的字段
 _PHASE_PREREQUISITES: dict[str, list[str]] = {
     "init": [],
-    "script": [],
+    "story": [],
+    "script": ["developed_story"],
     "character": ["structured_script"],
     "storyboard": ["structured_script", "character_db"],
     "image": ["structured_script", "character_db", "storyboard_plan"],
@@ -353,6 +358,13 @@ _PHASE_PREREQUISITES: dict[str, list[str]] = {
 # 每个阶段需要清除的输出字段（从该阶段开始，清除自身及之后所有阶段的输出）
 _PHASE_CLEAR_FIELDS: dict[str, list[str]] = {
     "init": [
+        "developed_story", "narrative_structure",
+        "structured_script", "emotion_curve", "character_db", "reference_chain",
+        "storyboard_plan", "layout_grids", "panel_images", "generation_metadata",
+        "final_pages", "exports",
+    ],
+    "story": [
+        "developed_story", "narrative_structure",
         "structured_script", "emotion_curve", "character_db", "reference_chain",
         "storyboard_plan", "layout_grids", "panel_images", "generation_metadata",
         "final_pages", "exports",
@@ -427,7 +439,8 @@ def _validate_and_reset_state(state: ComicState, start_phase: str) -> str | None
 
 
 _PHASE_LABELS_CN = {
-    "init": "从头开始", "script": "剧本阶段", "character": "角色阶段",
+    "init": "从头开始", "story": "故事阶段",
+    "script": "剧本阶段", "character": "角色阶段",
     "storyboard": "分镜阶段", "image": "图像阶段", "layout": "排版阶段",
 }
 
@@ -579,7 +592,10 @@ def respond_checkpoint(decision: str, guidance: str = "") -> Iterator[tuple]:
     # 如果是重新生成，清除对应阶段的预览数据和 state 字段
     if decision == "regenerate":
         cp_id = SESSION.last_checkpoint.get("id", "")
-        if cp_id == "after_script":
+        if cp_id == "after_story":
+            SESSION.state["developed_story"] = {}
+            SESSION.state["narrative_structure"] = {}
+        elif cp_id == "after_script":
             SESSION.state["structured_script"] = {}
             SESSION.state["emotion_curve"] = []
         elif cp_id == "after_character":
@@ -858,7 +874,8 @@ def open_project_by_id(project_id: str) -> tuple[str, str, str, str, str, str, d
 
     # 自动设置 start_phase 为下一阶段（半自动模式下继续工作流）
     _next_phase: dict[str, str] = {
-        "init": "init",
+        "init": "story",
+        "story": "script",
         "script": "character",
         "character": "storyboard",
         "storyboard": "image",
@@ -1075,6 +1092,7 @@ def build_ui() -> gr.Blocks:
                         label="起始阶段",
                         choices=[
                             ("从头开始", "init"),
+                            ("故事阶段", "story"),
                             ("剧本阶段", "script"),
                             ("角色阶段", "character"),
                             ("分镜阶段", "storyboard"),

@@ -40,6 +40,7 @@ class WorkflowMessage:
 
 # 关键确认节点(半自动模式触发)
 KEY_CHECKPOINTS = {
+    "after_story": "故事创作确认",
     "after_script": "剧本结构确认",
     "after_character": "角色设计确认",
     "after_storyboard": "分镜规划确认",

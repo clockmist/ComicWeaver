@@ -368,6 +368,7 @@ def render_agent_outputs(agent_outputs: dict[str, dict]) -> str:
         return '<div style="color:#64748b;padding:12px;">工作流尚未运行，无 Agent 输出数据。<br>请在「创作流程」Tab 启动工作流后再查看。</div>'
 
     agents_order = [
+        ("story_agent", "📖 故事 Agent", "故事创作"),
         ("script_agent", "📝 剧本 Agent", "剧本理解"),
         ("character_agent", "👤 角色 Agent", "角色管理"),
         ("storyboard_agent", "🎬 分镜 Agent", "分镜设计"),
@@ -1212,6 +1213,7 @@ def _render_page_svg(page_data: dict) -> str:
 # ============================================================================
 
 _PHASE_AGENTS_V3 = [
+    ("story_agent", "📖 故事"),
     ("script_agent", "📝 剧本"),
     ("character_agent", "👤 角色"),
     ("storyboard_agent", "🎬 分镜"),
@@ -1383,6 +1385,7 @@ def render_workflow_left(
 def _agent_to_phase(active: str, done: list[str]) -> str:
     """根据活跃/已完成 agent 推断当前阶段。"""
     agent_to_phase = {
+        "story_agent": "story",
         "script_agent": "script",
         "character_agent": "character",
         "storyboard_agent": "storyboard",
@@ -1392,7 +1395,7 @@ def _agent_to_phase(active: str, done: list[str]) -> str:
     if active and active in agent_to_phase:
         return agent_to_phase[active]
     # 返回最后完成的阶段
-    phase_order = ["script", "character", "storyboard", "image", "layout"]
+    phase_order = ["story", "script", "character", "storyboard", "image", "layout"]
     reverse_agents = {v: k for k, v in agent_to_phase.items()}
     last_phase = "init"
     for phase in phase_order:
@@ -1434,9 +1437,10 @@ def render_inline_checkpoint(checkpoint: dict | None) -> str:
 # v0.4 新增：阶段跳转、文字内容展示、指导信息
 # ============================================================================
 
-_PHASE_ORDER = ["init", "script", "character", "storyboard", "image", "layout"]
+_PHASE_ORDER = ["init", "story", "script", "character", "storyboard", "image", "layout"]
 _PHASE_LABELS: dict[str, str] = {
     "init": "初始",
+    "story": "故事",
     "script": "剧本",
     "character": "角色",
     "storyboard": "分镜",
@@ -1455,6 +1459,7 @@ def render_phase_jump_buttons(current_phase: str, done_agents: list[str] | None 
 
     # 将 done_agents 映射到 phase
     agent_to_phase = {
+        "story_agent": "story",
         "script_agent": "script",
         "character_agent": "character",
         "storyboard_agent": "storyboard",
@@ -1498,6 +1503,11 @@ def render_phase_text_content(state: dict | None, agent_outputs: dict[str, list[
         return '<div class="cw-phase-text-empty">尚未创建项目</div>'
 
     parts: list[str] = []
+
+    # v0.4: 故事阶段完成 → 显示完整故事
+    story = state.get("developed_story", {})
+    if story:
+        parts.append(_render_story_outline(story))
 
     # 解析角色名映射（供分镜/排版阶段引用）
     character_db = state.get("character_db", {})
@@ -1543,6 +1553,81 @@ def render_phase_text_content(state: dict | None, agent_outputs: dict[str, list[
 def _resolve_char_name(char_id: str, char_map: dict[str, str]) -> str:
     """将角色ID解析为显示名称。"""
     return char_map.get(char_id, char_id)
+
+
+def _render_story_outline(story: dict) -> str:
+    """Render the StoryAgent output: full narrative story with metadata (v0.2)."""
+    import html
+
+    title = html.escape(story.get("title", "未命名"))
+    author_note = html.escape((story.get("author_note") or "")[:200])
+    tone = html.escape(story.get("tone", ""))
+    genre = story.get("genre", [])
+    story_text = (story.get("story_text") or "").strip()
+    characters = story.get("characters", [])
+    core_conflict = html.escape((story.get("core_conflict") or ""))
+    setting = html.escape((story.get("setting") or ""))
+    target_pages = story.get("target_pages", 4)
+
+    genre_tags = " ".join(
+        f'<span class="cw-badge">{html.escape(str(g))}</span>' for g in genre
+    )
+
+    char_items = ""
+    for c in characters:
+        name = html.escape(c.get("name", "?"))
+        role = html.escape(c.get("role", "?"))
+        desc = html.escape((c.get("brief_description") or "")[:120])
+        char_items += (
+            f'<div class="cw-phase-text-scene">'
+            f'<b>{name}</b> <span class="cw-badge">{role}</span>'
+            f'<br><span style="color:#64748b;">{desc}</span>'
+            f'</div>'
+        )
+
+    # Format story text with paragraph breaks
+    paragraphs = story_text.split("\n\n") if story_text else ["等待生成..."]
+    formatted_text = ""
+    for para in paragraphs:
+        if para.strip():
+            formatted_text += (
+                f'<p style="line-height:1.8;text-indent:2em;margin:0 0 8px 0;">'
+                f'{html.escape(para.strip())}</p>'
+            )
+
+    word_count = len(story_text) if story_text else 0
+
+    return f"""
+    <div class="cw-phase-text-panel">
+        <h4>📖 故事: {title}</h4>
+        <div class="cw-phase-text-scroll">
+        <div class="cw-phase-text-item" style="margin-bottom:4px;">
+            <span style="color:#64748b;font-style:italic;">{author_note}</span>
+        </div>
+        <div class="cw-phase-text-item" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+            {genre_tags}
+            {f'<span class="cw-badge" style="background:#e0e7ff;color:#3730a3;">{tone}</span>' if tone else ''}
+            <span style="font-size:11px;color:#94a3b8;margin-left:auto;">
+                {target_pages}页 · {word_count}字
+            </span>
+        </div>
+        {f'<div class="cw-phase-text-item"><span class="key">背景设定:</span> <span class="val">{setting}</span></div>' if setting else ''}
+        {f'<div class="cw-phase-text-item"><span class="key">核心冲突:</span> <span class="val">{core_conflict}</span></div>' if core_conflict else ''}
+        {f'''<details style="margin-top:6px;">
+            <summary style="cursor:pointer;color:#3b82f6;font-size:13px;font-weight:600;">
+                👥 角色概览 ({len(characters)}人)
+            </summary>
+            {char_items}
+        </details>''' if characters else ''}
+        <div class="cw-phase-text-item" style="margin-top:12px;background:#fafbfc;
+                    border-left:3px solid #3b82f6;padding:12px 16px;border-radius:0 8px 8px 0;
+                    max-height:400px;overflow-y:auto;">
+            {formatted_text}
+        </div>
+        </div>
+    </div>
+    """
+
 
 
 def _render_detailed_script(script: dict, char_map: dict[str, str]) -> str:

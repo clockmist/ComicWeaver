@@ -171,20 +171,19 @@ class NarrativeStructure(BaseModel):
 # ===========================================================================
 
 class StoryOutput(BaseModel):
-    """StoryAgent 输出：完整的故事开发结果。"""
+    """StoryAgent v0.2 输出：完整的叙事故事（散文体，非结构化脚本）。"""
     title: str = ""
-    premise: str = ""               # 1-2 句高概念
-    theme: str = ""                 # 中心主题
+    author_note: str = ""           # 1-2 句高概念 / logline
+    tone: str = ""                  # 叙事基调 (如 "dark noir mystery")
     genre: list[str] = Field(default_factory=list)
-    summary: str = ""               # 完整故事摘要 (3-5 段)
-    core_conflict: str = ""         # 核心冲突
-    act_structure: str = ""         # 三幕/起承转合结构描述
-    character_arcs: list[dict] = Field(default_factory=list)
-    # [{char_id, name, arc_description, starting_state, ending_state}]
-    emotional_throughline: str = "" # 读者情感旅程描述
+    story_text: str = ""            # ★ 核心输出：完整叙事故事，可读的散文体
+    characters: list[dict] = Field(default_factory=list)
+    # [{name, role, brief_description}] — 轻量角色，详细设计留给 CharacterAgent
+    core_conflict: str = ""         # 核心戏剧冲突
+    setting: str = ""               # 时间/地点/世界观
     target_pages: int = 4
     meta: AgentOutputMeta = Field(default_factory=lambda: AgentOutputMeta(
-        agent="story_agent", version="0.1.0"
+        agent="story_agent", version="0.2.0"
     ))
 
 

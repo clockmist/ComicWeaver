@@ -168,7 +168,7 @@ class ComicWorkflow:
     # ------------------------------------------------------------------
 
     async def _node_story(self, state: ComicState) -> ComicState:
-        """v0.4: StoryAgent — expand raw user input into a complete story outline."""
+        """v0.4: StoryAgent — expand raw user input into a complete narrative story."""
         t0 = time.perf_counter()
         writer = get_stream_writer()
         writer(WorkflowMessage(WorkflowEvent.NODE_START, "story_agent"))
@@ -188,22 +188,45 @@ class ComicWorkflow:
             "target_pages": inputs.target_pages,
         }))
 
-        try:
-            async for evt in self.story_agent.astream(inputs, ctx):
-                writer(evt)
-                if evt.type == StreamEventType.DONE and evt.content:
-                    state["developed_story"] = evt.content
-                    writer(log_agent_output("story_agent", {
-                        "title": evt.content.get("title", ""),
-                        "genre": evt.content.get("genre", []),
-                        "character_arcs_count": len(evt.content.get("character_arcs", [])),
-                    }))
-        except Exception as exc:
-            writer(log_agent_error("story_agent", f"执行失败: {exc}",
-                {"raw_text": inputs.raw_text[:100], "error_type": type(exc).__name__}))
-            raise
+        # --- Regenerate loop: 用户选择"重新生成"时重新执行 agent ---
+        while True:
+            try:
+                async for evt in self.story_agent.astream(inputs, ctx):
+                    writer(evt)
+                    if evt.type == StreamEventType.DONE and evt.content:
+                        state["developed_story"] = evt.content
+                        word_count = len(evt.content.get("story_text", ""))
+                        writer(log_agent_output("story_agent", {
+                            "title": evt.content.get("title", ""),
+                            "genre": evt.content.get("genre", []),
+                            "tone": evt.content.get("tone", ""),
+                            "word_count": word_count,
+                            "character_count": len(evt.content.get("characters", [])),
+                        }))
+            except Exception as exc:
+                writer(log_agent_error("story_agent", f"执行失败: {exc}",
+                    {"raw_text": inputs.raw_text[:100], "error_type": type(exc).__name__}))
+                raise
 
-        self._save_checkpoint(state)
+            # --- Checkpoint & auto-save ---
+            self._save_checkpoint(state)
+            if not should_pause(state, "after_story"):
+                break
+            writer(CheckpointSignal(
+                checkpoint_id="after_story",
+                label=KEY_CHECKPOINTS["after_story"],
+                payload={
+                    "phase": state.get("current_phase", "?"),
+                    "project_id": state.get("project_id", "?"),
+                },
+            ))
+            await self._await_response()
+            if self._last_decision != "regenerate":
+                break
+            state["developed_story"] = {}
+            if self._last_guidance:
+                writer(log_workflow_event("用户指导", self._last_guidance[:200]))
+
         elapsed = (time.perf_counter() - t0) * 1000
         writer(log_performance("story_agent", elapsed))
         writer(WorkflowMessage(WorkflowEvent.NODE_END, "story_agent"))

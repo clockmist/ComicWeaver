@@ -146,24 +146,7 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
         # v0.4: Use story context if available, otherwise fallback to raw_text
         story = inputs.story
         if story:
-            story_context = (
-                f"=== DEVELOPED STORY ===\n"
-                f"Title: {story.title}\n"
-                f"Premise: {story.premise}\n"
-                f"Theme: {story.theme}\n"
-                f"Genre: {', '.join(story.genre)}\n"
-                f"Summary: {story.summary}\n"
-                f"Core Conflict: {story.core_conflict}\n"
-                f"Act Structure: {story.act_structure}\n"
-                f"Emotional Throughline: {story.emotional_throughline}\n"
-                f"Character Arcs: {story.character_arcs}\n"
-                f"\n=== YOUR TASK ===\n"
-                f"Adapt the above story into a comic script. The story gives you the full "
-                f"narrative arc — now translate it into visual comic language. "
-                f"Choose the most visually powerful moments for each scene. "
-                f"Design dialogue that reveals character and advances the plot. "
-                f"Think about what the READER SEES in each panel.\n"
-            )
+            story_context = _build_story_context(story)
         else:
             story_context = (
                 f'Create a comic script based on this story idea:\n\n'
@@ -315,7 +298,7 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
 
         title = _make_title(raw_text)
         if story:
-            summary = story.summary or f"基于「{raw_text[:30]}」改编的{n_scenes}场漫画故事。"
+            summary = story.author_note or (story.story_text[:200] if story.story_text else "") or f"基于「{raw_text[:30]}」改编的{n_scenes}场漫画故事。"
         else:
             summary = f"基于「{raw_text[:30]}」改编的{n_scenes}场漫画故事。"
 
@@ -410,6 +393,76 @@ def _make_shot_sequence_hint(i: int, total: int) -> str:
         return "中景紧张对峙 → 特写关键细节 → 极端特写表情"
     else:
         return "中景 → 远景收尾"
+
+
+def _build_story_context(story) -> str:
+    """Build story context for ScriptAgent LLM prompt from StoryOutput (v0.2).
+
+    Supports both v0.2 fields (story_text, author_note, tone, setting, characters)
+    and legacy v0.1 fields (summary, premise, theme, act_structure, character_arcs).
+    """
+    # v0.2 fields
+    story_text = getattr(story, "story_text", "") or ""
+    author_note = getattr(story, "author_note", "") or ""
+    tone = getattr(story, "tone", "") or ""
+    setting = getattr(story, "setting", "") or ""
+    characters = getattr(story, "characters", []) or []
+
+    # If v0.2 fields are populated, use them
+    if story_text:
+        char_lines = "\n".join(
+            f"  - {c.get('name', '?')} ({c.get('role', '?')}): {c.get('brief_description', '')}"
+            for c in characters
+        )
+        return (
+            f"=== DEVELOPED STORY ===\n"
+            f"Title: {story.title}\n"
+            f"Author's Note: {author_note}\n"
+            f"Tone/Mood: {tone}\n"
+            f"Genre: {', '.join(story.genre)}\n"
+            f"Setting: {setting}\n"
+            f"Core Conflict: {story.core_conflict}\n"
+            f"Characters:\n{char_lines}\n"
+            f"\n=== FULL STORY TEXT ===\n"
+            f"{story_text}\n"
+            f"\n=== YOUR TASK ===\n"
+            f"Adapt the above story into a comic script. The story text contains the full "
+            f"narrative arc — now translate it into visual comic language. "
+            f"Choose the most visually powerful moments for each scene. "
+            f"Design dialogue that reveals character and advances the plot. "
+            f"Think about what the READER SEES in each panel.\n"
+        )
+
+    # Legacy v0.1 fields (backward compatibility)
+    summary = getattr(story, "summary", "") or ""
+    premise = getattr(story, "premise", "") or ""
+    theme = getattr(story, "theme", "") or ""
+    act_structure = getattr(story, "act_structure", "") or ""
+    character_arcs = getattr(story, "character_arcs", []) or []
+    emotional_throughline = getattr(story, "emotional_throughline", "") or ""
+
+    if summary or premise:
+        return (
+            f"=== DEVELOPED STORY (legacy format) ===\n"
+            f"Title: {story.title}\n"
+            f"Premise: {premise}\n"
+            f"Theme: {theme}\n"
+            f"Genre: {', '.join(story.genre)}\n"
+            f"Summary: {summary}\n"
+            f"Core Conflict: {story.core_conflict}\n"
+            f"Act Structure: {act_structure}\n"
+            f"Emotional Throughline: {emotional_throughline}\n"
+            f"Character Arcs: {character_arcs}\n"
+            f"\n=== YOUR TASK ===\n"
+            f"Adapt the above story into a comic script. The story gives you the full "
+            f"narrative arc — now translate it into visual comic language. "
+            f"Choose the most visually powerful moments for each scene. "
+            f"Design dialogue that reveals character and advances the plot. "
+            f"Think about what the READER SEES in each panel.\n"
+        )
+
+    # No story content available
+    return ""
 
 
 def _tone_for_position(i: int, total: int) -> str:
