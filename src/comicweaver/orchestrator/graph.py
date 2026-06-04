@@ -826,6 +826,31 @@ class ComicWorkflow:
 # 模块级辅助函数
 # ---------------------------------------------------------------------------
 
+_VALID_ROLES = {"protagonist", "antagonist", "supporting", "extra"}
+
+_ROLE_NORMALIZE: dict[str, str] = {
+    "deuteragonist": "supporting",
+    "tritagonist": "supporting",
+    "villain": "antagonist",
+    "hero": "protagonist",
+    "main": "protagonist",
+    " lead": "protagonist",
+    "side": "supporting",
+    "minor": "extra",
+    "background": "extra",
+    "rival": "antagonist",
+    "mentor": "supporting",
+}
+
+
+def _normalize_role(raw: str) -> str:
+    """将 LLM 自由输出的角色类型映射到合法的 CharacterDraft.role 枚举值。"""
+    role = str(raw).strip().lower()
+    if role in _VALID_ROLES:
+        return role
+    return _ROLE_NORMALIZE.get(role, "supporting")
+
+
 def _story_chars_to_drafts(story_chars: list[dict]) -> list[CharacterDraft]:
     """v1.0: 将 StoryOutput.characters 转换为 CharacterDraft 列表。"""
     drafts = []
@@ -833,7 +858,7 @@ def _story_chars_to_drafts(story_chars: list[dict]) -> list[CharacterDraft]:
         drafts.append(CharacterDraft(
             char_id=f"char_{i:03d}",
             name=c.get("name", f"角色{i}"),
-            role=c.get("role", "supporting"),
+            role=_normalize_role(c.get("role", "supporting")),
             appearance=c.get("brief_description", ""),
             first_appearance_scene=0,
         ))
