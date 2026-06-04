@@ -10,6 +10,7 @@ import asyncio
 import os
 import time
 from collections.abc import Iterator
+from pathlib import Path
 
 import gradio as gr
 
@@ -930,6 +931,7 @@ def main() -> None:
         show_error=True,
         inbrowser=False,
         css=CUSTOM_CSS,
+        allowed_paths=[str(Path.cwd())],
     )
 
 
