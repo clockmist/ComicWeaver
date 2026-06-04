@@ -56,6 +56,7 @@ class CheckpointSignal:
     user_options: list[str] = field(
         default_factory=lambda: ["accept", "regenerate"]
     )
+    guidance_enabled: bool = True
     timestamp: float = field(default_factory=time.time)
 
 

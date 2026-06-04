@@ -5,11 +5,25 @@ LangGraph 的状态字典定义。使用 TypedDict 以兼容 LangGraph 的状态
 """
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from typing import TypedDict
 
 from pydantic import BaseModel, Field
+
+
+def _sanitize_project_name(name: str, max_len: int = 20) -> str:
+    """将项目名称转换为安全的文件夹名。
+
+    保留中文、英文、数字、下划线、连字符，去除其他特殊字符。
+    如果 sanitize 后为空，返回 "project"。
+    """
+    cleaned = re.sub(r"[^\w\u4e00-\u9fff\-]", "_", name.strip())
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+    if not cleaned:
+        return "project"
+    return cleaned[:max_len]
 
 
 class ComicState(TypedDict, total=False):
@@ -65,9 +79,14 @@ def make_initial_state(
     title: str = "",
 ) -> ComicState:
     """构造初始状态。"""
+    resolved_title = title or user_input[:30]
+    safe_name = _sanitize_project_name(resolved_title)
+    short_uid = str(uuid.uuid4())[:6]
+    project_id = f"{safe_name}_{short_uid}"
+
     return ComicState(
         user_input=user_input,
-        title=title or user_input[:30],
+        title=resolved_title,
         creation_mode=creation_mode,
         style_preset=style_preset,
         interaction_mode=interaction_mode,
@@ -90,7 +109,7 @@ def make_initial_state(
         stream_messages=[],
         current_phase="init",
         errors=[],
-        project_id=str(uuid.uuid4())[:8],
+        project_id=project_id,
     )
 
 
