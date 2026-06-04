@@ -510,4 +510,174 @@ CUSTOM_CSS = """
 /* ===== v0.3: 工作流左右分栏 ===== */
 .cw-workflow-left { min-width: 0; }
 .cw-workflow-right { min-width: 0; }
+
+/* ===== v0.4: 阶段跳转按钮组 ===== */
+.cw-phase-jump-bar {
+    display: flex;
+    gap: 4px;
+    padding: 6px 0;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.cw-phase-jump-label {
+    font-size: 11px;
+    color: #64748b;
+    margin-right: 4px;
+}
+.cw-phase-jump-btn {
+    padding: 3px 10px;
+    border-radius: 12px;
+    border: 1px solid #d1d5db;
+    background: #f8fafc;
+    font-size: 11px;
+    cursor: pointer;
+    color: #475569;
+    transition: all 0.15s;
+}
+.cw-phase-jump-btn:hover {
+    background: #3b82f6;
+    color: white;
+    border-color: #3b82f6;
+}
+.cw-phase-jump-btn.current {
+    background: #1e40af;
+    color: white;
+    border-color: #1e40af;
+    font-weight: 600;
+}
+.cw-phase-jump-btn.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* ===== v0.4: 阶段文字内容面板 ===== */
+.cw-phase-text-panel {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 8px;
+    max-height: 500px;
+    display: flex;
+    flex-direction: column;
+}
+.cw-phase-text-panel h4 {
+    margin: 0 0 8px 0;
+    color: #1e293b;
+    font-size: 13px;
+    border-bottom: 1px solid #f1f5f9;
+    padding-bottom: 6px;
+    flex-shrink: 0;
+}
+.cw-phase-text-scroll {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    min-height: 0;
+}
+.cw-phase-text-item {
+    font-size: 12px;
+    color: #475569;
+    padding: 3px 0;
+    line-height: 1.5;
+}
+.cw-phase-text-item .key {
+    color: #1e40af;
+    font-weight: 500;
+}
+.cw-phase-text-item .val {
+    color: #334155;
+}
+.cw-phase-text-scenes {
+    margin-top: 4px;
+}
+.cw-phase-text-scene {
+    background: #f8fafc;
+    border-left: 3px solid #3b82f6;
+    padding: 4px 8px;
+    margin: 4px 0;
+    font-size: 11px;
+    border-radius: 0 4px 4px 0;
+    line-height: 1.5;
+}
+.cw-phase-text-empty {
+    color: #94a3b8;
+    font-size: 12px;
+    font-style: italic;
+    padding: 8px;
+}
+/* 详细面板内的折叠元素 */
+.cw-phase-text-panel details {
+    margin: 2px 0;
+}
+.cw-phase-text-panel details summary {
+    padding: 4px 0;
+    border-radius: 4px;
+    transition: background 0.15s;
+}
+.cw-phase-text-panel details summary:hover {
+    background: #f1f5f9;
+}
+.cw-phase-text-panel details[open] summary {
+    margin-bottom: 4px;
+}
+.cw-panel-detail-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin: 4px 0;
+    font-size: 11px;
+}
+
+/* ===== v0.4: 阶段耗时指示器 ===== */
+.cw-elapsed {
+    font-size: 11px;
+    color: #94a3b8;
+    font-family: 'JetBrains Mono', monospace;
+    margin-left: 8px;
+}
+.cw-elapsed.active {
+    color: #f59e0b;
+    animation: cw-pulse 1.5s ease-in-out infinite;
+}
+
+/* ===== v0.4: 实时内容面板（右侧）===== */
+.cw-live-content {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 10px;
+    min-height: 200px;
+    max-height: 650px;
+    overflow-y: auto;
+}
+
+/* ===== v0.4: 指导输入框 ===== */
+.cw-guidance-input textarea {
+    border: 1px solid #f59e0b !important;
+    background: #fffbeb !important;
+}
+.cw-guidance-input textarea:focus {
+    border-color: #d97706 !important;
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2) !important;
+}
+.cw-guidance-hint {
+    font-size: 11px;
+    color: #92400e;
+    margin-top: 4px;
+    font-style: italic;
+}
+
+/* ===== v0.4: Checkpoint 操作区域 ===== */
+.cw-checkpoint-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+.cw-checkpoint-buttons {
+    display: flex;
+    gap: 8px;
+}
 """

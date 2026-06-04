@@ -26,10 +26,12 @@ from .html_widgets import (
     render_dev_log,
     render_emotion_curve,
     render_inline_checkpoint,
+    render_live_content,
     render_live_panel_preview,
     render_page_reader,
     render_panel_images_gallery,
     render_performance_summary,
+    render_phase_text_content,
     render_project_cards,
     render_project_info,
     render_review_full_detail,
@@ -67,6 +69,9 @@ class Session:
         self.dev_log: list[dict] = []                    # DevLogEntry dicts
         self.panel_images_preview: list[dict] = []       # 实时面板预览
         self.character_preview: list[dict] = []          # 角色人设图预览
+        # v0.4: 时间追踪和阶段信息
+        self.agent_start_time: float = 0.0              # 当前 agent 开始时间
+        self.current_phase: str = "init"                # 工作流当前阶段
         # asyncio 资源
         self._task: asyncio.Task | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -84,6 +89,8 @@ class Session:
         self.dev_log = []
         self.panel_images_preview = []
         self.character_preview = []
+        self.agent_start_time = 0.0
+        self.current_phase = "init"
         self._task = None
         self._loop = None
 
@@ -126,6 +133,14 @@ async def _consume_workflow(session: Session) -> None:
             if hasattr(msg, "event"):
                 if msg.event == WorkflowEvent.NODE_START:
                     session.active_agent = msg.node
+                    session.agent_start_time = time.time()
+                    # 更新 current_phase
+                    agent_to_phase = {
+                        "script_agent": "script", "character_agent": "character",
+                        "storyboard_agent": "storyboard", "image_agent": "image",
+                        "layout_agent": "layout",
+                    }
+                    session.current_phase = agent_to_phase.get(msg.node, "init")
                     session.event_log.append({
                         "agent": msg.node,
                         "type": "log",
@@ -218,6 +233,24 @@ async def _consume_workflow(session: Session) -> None:
                         # 实时面板预览：image_agent 完成时收集图像
                         if agent_name == "image_agent" and "panel_image" in content:
                             session.panel_images_preview.append(content["panel_image"])
+                            # 同步更新 state.panel_images（逐面板累积）
+                            pis = session.state.setdefault("panel_images", [])
+                            pis.append(content["panel_image"])
+                        # 同步更新 session.state：LangGraph 仅在节点返回时同步 state，
+                        # 但 checkpoint 在节点返回前触发，故需在此提前写入
+                        if session.state is not None:
+                            if agent_name == "script_agent":
+                                session.state["structured_script"] = content
+                                session.state["emotion_curve"] = content.get("emotion_curve", [])
+                            elif agent_name == "character_agent":
+                                session.state["character_db"] = content.get("character_db") or {}
+                            elif agent_name == "storyboard_agent":
+                                pages = content.get("pages", [])
+                                if pages:
+                                    session.state["storyboard_plan"] = pages
+                            elif agent_name == "layout_agent":
+                                session.state["final_pages"] = content.get("final_pages", [])
+                                session.state["exports"] = content.get("exports", [])
                         # 日志中显示摘要
                         keys = list(content.keys())
                         summary = f"✓ 完成 · 输出 {len(content)} 个字段: {', '.join(keys[:8])}"
@@ -308,49 +341,168 @@ def create_project(
     )
 
 
-def start_workflow() -> Iterator[tuple]:
-    """启动工作流并周期性产出UI更新（v0.3 6元组）。"""
+# 阶段定义：顺序、前置依赖、需要清除的字段
+_PHASE_PREREQUISITES: dict[str, list[str]] = {
+    "init": [],
+    "script": [],
+    "character": ["structured_script"],
+    "storyboard": ["structured_script", "character_db"],
+    "image": ["structured_script", "character_db", "storyboard_plan"],
+    "layout": ["structured_script", "character_db", "storyboard_plan", "panel_images"],
+}
+# 每个阶段需要清除的输出字段（从该阶段开始，清除自身及之后所有阶段的输出）
+_PHASE_CLEAR_FIELDS: dict[str, list[str]] = {
+    "init": [
+        "structured_script", "emotion_curve", "character_db", "reference_chain",
+        "storyboard_plan", "layout_grids", "panel_images", "generation_metadata",
+        "final_pages", "exports",
+    ],
+    "script": [
+        "structured_script", "emotion_curve", "character_db", "reference_chain",
+        "storyboard_plan", "layout_grids", "panel_images", "generation_metadata",
+        "final_pages", "exports",
+    ],
+    "character": [
+        "character_db", "reference_chain",
+        "storyboard_plan", "layout_grids", "panel_images", "generation_metadata",
+        "final_pages", "exports",
+    ],
+    "storyboard": [
+        "storyboard_plan", "layout_grids",
+        "panel_images", "generation_metadata",
+        "final_pages", "exports",
+    ],
+    "image": [
+        "panel_images", "generation_metadata",
+        "final_pages", "exports",
+    ],
+    "layout": [
+        "final_pages", "exports",
+    ],
+}
+
+
+def _validate_and_reset_state(state: ComicState, start_phase: str) -> str | None:
+    """验证前置条件并清除对应阶段的输出数据。
+
+    返回 None 表示成功，否则返回错误消息字符串。
+    """
+    # 1. 检查前置依赖
+    prerequisites = _PHASE_PREREQUISITES.get(start_phase, [])
+    for field in prerequisites:
+        value = state.get(field)
+        if value is None or (isinstance(value, (dict, list)) and len(value) == 0):
+            phase_label = _PHASE_LABELS_CN.get(start_phase, start_phase)
+            field_label = {
+                "structured_script": "剧本",
+                "character_db": "角色设计",
+                "storyboard_plan": "分镜规划",
+                "panel_images": "面板图像",
+            }.get(field, field)
+            return f"❌ 无法从「{phase_label}」阶段开始：缺少前置数据「{field_label}」。\n请先从头开始或从已完成的更早阶段开始。"
+
+    # 2. 清除该阶段及之后阶段的输出
+    clear_fields = _PHASE_CLEAR_FIELDS.get(start_phase, [])
+    for field in clear_fields:
+        if field in state:
+            if field in ("emotion_curve", "reference_chain", "storyboard_plan",
+                         "layout_grids", "panel_images", "generation_metadata",
+                         "final_pages", "exports"):
+                state[field] = []  # type: ignore[literal-required]
+            else:
+                state[field] = {}  # type: ignore[literal-required]
+
+    # 3. 始终清除的通用字段
+    state["review_results"] = []
+    state["retry_counts"] = {}
+    state["pending_checkpoint"] = None
+    state["user_decisions"] = []
+    state["stream_messages"] = []
+    state["errors"] = []
+
+    # 4. 更新 current_phase
+    state["current_phase"] = start_phase
+
+    return None
+
+
+_PHASE_LABELS_CN = {
+    "init": "从头开始", "script": "剧本阶段", "character": "角色阶段",
+    "storyboard": "分镜阶段", "image": "图像阶段", "layout": "排版阶段",
+}
+
+
+def start_workflow(start_phase: str = "init") -> Iterator[tuple]:
+    """启动工作流并周期性产出UI更新（v0.4 7元组）。
+
+    start_phase: "init"(默认从头开始) 或 "script"/"character"/"storyboard"/"image"/"layout"
+    """
     if SESSION.state is None:
         yield (
             "❌ 请先在「📋 项目」Tab 创建或打开项目",
             render_workflow_left("", [], [], None),
-            render_live_panel_preview([], []),
+            render_live_content([], [], ""),
             render_project_info(),
             gr.update(interactive=False),
             gr.update(interactive=False),
+            gr.update(interactive=False, value=""),
         )
         return
 
-    current_phase = SESSION.state.get("current_phase", "init")
-    is_resume = current_phase not in ("init",)
-    if SESSION.workflow is None:
-        if is_resume:
-            SESSION.workflow = ComicWorkflow(resume_phase=current_phase)
-        else:
-            SESSION.workflow = ComicWorkflow()
+    # 确定实际启动阶段
+    if start_phase and start_phase != "init":
+        resume_phase = start_phase
+    else:
+        resume_phase = None  # None = 从头开始 (init → script)
+
+    # 验证前置条件，清除该阶段及之后的输出数据
+    effective_phase = resume_phase or "init"
+    error_msg = _validate_and_reset_state(SESSION.state, effective_phase)
+    if error_msg:
+        yield (
+            error_msg,
+            render_workflow_left("", [], [], None),
+            render_live_content([], [], ""),
+            render_project_info(SESSION.state),
+            gr.update(interactive=False),
+            gr.update(interactive=False),
+            gr.update(interactive=False, value=""),
+        )
+        return
+
+    is_resume = resume_phase is not None
+
+    # 始终创建新的 workflow 实例（使用用户选择的阶段）
+    SESSION.workflow = ComicWorkflow(resume_phase=resume_phase)
     SESSION.event_log = []
     SESSION.done_agents = []
     SESSION.workflow_done = False
     SESSION.last_checkpoint = None
     SESSION.panel_images_preview = []
     SESSION.character_preview = []
+    SESSION.agent_outputs = {}
+    SESSION.agent_start_time = time.time()
 
     loop = _ensure_loop(SESSION)
     SESSION._task = asyncio.run_coroutine_threadsafe(
         _consume_workflow(SESSION), loop
     )
 
-    resume_note = " (从断点恢复)" if is_resume else ""
+    resume_note = f" (从 {resume_phase} 恢复)" if is_resume else ""
     yield (
         f"🚀 工作流已启动{resume_note}...",
         render_workflow_left(
             SESSION.active_agent, SESSION.done_agents,
             SESSION.event_log, SESSION.last_checkpoint,
         ),
-        render_live_panel_preview(SESSION.panel_images_preview, SESSION.character_preview),
+        render_live_content(
+            SESSION.panel_images_preview, SESSION.character_preview,
+            render_phase_text_content(SESSION.state, SESSION.agent_outputs),
+        ),
         render_project_info(SESSION.state),
         gr.update(interactive=False),
         gr.update(interactive=False),
+        gr.update(interactive=False, value=""),
     )
 
     while True:
@@ -364,16 +516,26 @@ def start_workflow() -> Iterator[tuple]:
         elif at_checkpoint:
             status = f"⏸ 等待确认: {SESSION.last_checkpoint['label']}"
 
+        # 计算当前 agent 耗时
+        elapsed = 0.0
+        if SESSION.active_agent and SESSION.agent_start_time > 0:
+            elapsed = time.time() - SESSION.agent_start_time
+
         yield (
             status,
             render_workflow_left(
                 SESSION.active_agent, SESSION.done_agents,
                 SESSION.event_log, SESSION.last_checkpoint,
+                elapsed,
             ),
-            render_live_panel_preview(SESSION.panel_images_preview, SESSION.character_preview),
+            render_live_content(
+                SESSION.panel_images_preview, SESSION.character_preview,
+                render_phase_text_content(SESSION.state, SESSION.agent_outputs),
+            ),
             render_project_info(SESSION.state),
             gr.update(interactive=at_checkpoint),
             gr.update(interactive=at_checkpoint),
+            gr.update(interactive=at_checkpoint, value=""),
         )
 
         if SESSION.workflow_done or SESSION.error:
@@ -382,8 +544,12 @@ def start_workflow() -> Iterator[tuple]:
             break
 
 
-def respond_checkpoint(decision: str) -> Iterator[tuple]:
-    """响应当前确认点,继续执行工作流（v0.3 6元组）。"""
+def respond_checkpoint(decision: str, guidance: str = "") -> Iterator[tuple]:
+    """响应当前确认点,继续执行工作流（v0.4 7元组）。
+
+    decision: "accept" 或 "regenerate"
+    guidance: 用户可选的指导信息
+    """
     if SESSION.workflow is None or SESSION.last_checkpoint is None:
         yield (
             "❌ 没有等待响应的确认点",
@@ -391,21 +557,44 @@ def respond_checkpoint(decision: str) -> Iterator[tuple]:
                 SESSION.active_agent, SESSION.done_agents,
                 SESSION.event_log, SESSION.last_checkpoint,
             ),
-            render_live_panel_preview(SESSION.panel_images_preview, SESSION.character_preview),
+            render_live_content([], [], ""),
             render_project_info(SESSION.state),
             gr.update(interactive=False),
             gr.update(interactive=False),
+            gr.update(interactive=False, value=""),
         )
         return
 
-    SESSION.workflow.respond(decision)
+    # 发送响应（带指导信息）
+    SESSION.workflow.respond(decision, guidance)
     decision_label = {"accept": "接受并继续", "regenerate": "重新生成"}.get(decision, decision)
+    guidance_note = f" (指导: {guidance[:50]})" if guidance else ""
     SESSION.event_log.append({
         "agent": "user",
         "type": "log",
-        "content": f"用户决策: {decision_label}",
+        "content": f"用户决策: {decision_label}{guidance_note}",
         "timestamp": time.time(),
     })
+
+    # 如果是重新生成，清除对应阶段的预览数据和 state 字段
+    if decision == "regenerate":
+        cp_id = SESSION.last_checkpoint.get("id", "")
+        if cp_id == "after_script":
+            SESSION.state["structured_script"] = {}
+            SESSION.state["emotion_curve"] = []
+        elif cp_id == "after_character":
+            SESSION.state["character_db"] = {}
+            SESSION.character_preview = []
+        elif cp_id == "after_storyboard":
+            SESSION.state["storyboard_plan"] = []
+        elif cp_id == "after_image":
+            SESSION.state["panel_images"] = []
+            SESSION.panel_images_preview = []
+        elif cp_id == "after_layout":
+            SESSION.state["final_pages"] = []
+            SESSION.state["exports"] = []
+            SESSION.panel_images_preview = []
+
     SESSION.last_checkpoint = None
 
     yield (
@@ -414,10 +603,14 @@ def respond_checkpoint(decision: str) -> Iterator[tuple]:
             SESSION.active_agent, SESSION.done_agents,
             SESSION.event_log, SESSION.last_checkpoint,
         ),
-        render_live_panel_preview(SESSION.panel_images_preview, SESSION.character_preview),
+        render_live_content(
+            SESSION.panel_images_preview, SESSION.character_preview,
+            render_phase_text_content(SESSION.state, SESSION.agent_outputs),
+        ),
         render_project_info(SESSION.state),
         gr.update(interactive=False),
         gr.update(interactive=False),
+        gr.update(interactive=False, value=""),
     )
 
     while True:
@@ -431,16 +624,25 @@ def respond_checkpoint(decision: str) -> Iterator[tuple]:
         elif at_checkpoint:
             status = f"⏸ 等待确认: {SESSION.last_checkpoint['label']}"
 
+        elapsed = 0.0
+        if SESSION.active_agent and SESSION.agent_start_time > 0:
+            elapsed = time.time() - SESSION.agent_start_time
+
         yield (
             status,
             render_workflow_left(
                 SESSION.active_agent, SESSION.done_agents,
                 SESSION.event_log, SESSION.last_checkpoint,
+                elapsed,
             ),
-            render_live_panel_preview(SESSION.panel_images_preview, SESSION.character_preview),
+            render_live_content(
+                SESSION.panel_images_preview, SESSION.character_preview,
+                render_phase_text_content(SESSION.state, SESSION.agent_outputs),
+            ),
             render_project_info(SESSION.state),
             gr.update(interactive=at_checkpoint),
             gr.update(interactive=at_checkpoint),
+            gr.update(interactive=at_checkpoint, value="" if not at_checkpoint else None),
         )
 
         if SESSION.workflow_done or SESSION.error or at_checkpoint:
@@ -594,26 +796,85 @@ def list_projects_cards() -> str:
     return render_project_cards(card_data)
 
 
-def open_project_by_id(project_id: str) -> tuple[str, str]:
-    """通过项目 ID 字符串打开已保存项目。"""
+def open_project_by_id(project_id: str) -> tuple[str, str, str, str, str, str, dict]:
+    """通过项目 ID 字符串打开已保存项目。
+    返回 (status, cards, proj_info, left_panel, right_panel, start_phase, tabs_update)。
+    """
     from comicweaver.storage import load_project, project_to_state
 
     pid = (project_id or "").strip()
     if not pid:
-        return "❌ 请输入项目ID", list_projects_cards()
+        return (
+            "❌ 请输入项目ID", list_projects_cards(), render_project_info(),
+            render_workflow_left("", [], [], None),
+            render_live_content([], [], ""),
+            "init",
+            gr.update(),
+        )
 
     project = load_project(pid)
     if project is None:
-        return f"❌ 项目 {pid} 不存在", list_projects_cards()
+        return (
+            f"❌ 项目 {pid} 不存在", list_projects_cards(), render_project_info(),
+            render_workflow_left("", [], [], None),
+            render_live_content([], [], ""),
+            "init",
+            gr.update(),
+        )
 
     state = project_to_state(project)
     SESSION.reset()
     SESSION.state = state
-    SESSION.workflow = ComicWorkflow.from_saved_project(pid)
+
+    # 从已保存状态中提取角色预览图
+    character_db = state.get("character_db", {})
+    char_preview: list[dict] = []
+    for cid, cp in character_db.get("characters", {}).items():
+        ref = cp.get("base_reference", {})
+        img_path = ref.get("image_path", "")
+        if img_path:
+            char_preview.append({
+                "kind": "character", "char_id": cid,
+                "name": cp.get("name", cid), "image_path": img_path,
+            })
+
+    # 从已保存状态中提取面板图像预览
+    panel_images = state.get("panel_images", [])
+    panel_preview: list[dict] = []
+    for pi in panel_images:
+        img_path = pi.get("image_path", "")
+        if img_path:
+            panel_preview.append({"panel_id": pi.get("panel_id", "?"), "image_path": img_path})
+
+    # 渲染右侧面板：已保存阶段的文字内容 + 图像预览
+    right_html = render_live_content(
+        panel_preview, char_preview,
+        render_phase_text_content(state, SESSION.agent_outputs),
+    )
+
+    # 渲染左侧面板：显示当前阶段,无活跃/已完成 agent
+    current_phase = state.get("current_phase", "init")
+    left_html = render_workflow_left("", [], [], None, current_phase=current_phase)
+
+    # 自动设置 start_phase 为下一阶段（半自动模式下继续工作流）
+    _next_phase: dict[str, str] = {
+        "init": "init",
+        "script": "character",
+        "character": "storyboard",
+        "storyboard": "image",
+        "image": "layout",
+        "layout": "layout",
+    }
+    next_phase = _next_phase.get(current_phase, "init")
 
     return (
-        f"✅ 已加载: {project.title} — 切换到「⚡ 创作」Tab 即可继续",
+        f"✅ 已加载: {project.title} — 已自动切换到「⚡ 创作」Tab",
         list_projects_cards(),
+        render_project_info(state),
+        left_html,
+        right_html,
+        next_phase,
+        gr.update(selected="⚡ 创作"),
     )
 
 
@@ -669,18 +930,53 @@ def save_current_project() -> str:
 # ============================================================================
 
 def build_ui() -> gr.Blocks:
-    with gr.Blocks(title="ComicWeaver") as demo:
+    with gr.Blocks(title="ComicWeaver", head="""
+        <script>
+        (function() {
+            // 辅助
+            function _findInput(wrapId) {
+                var wrap = document.getElementById(wrapId);
+                if (!wrap) return null;
+                return wrap.querySelector('textarea, input');
+            }
+            function _setNativeValue(field, value) {
+                var proto = field instanceof HTMLTextAreaElement
+                    ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                var desc = Object.getOwnPropertyDescriptor(proto, 'value');
+                if (desc && desc.set) desc.set.call(field, value);
+                else field.value = value;
+                // 派发多种事件以确保 Gradio/Svelte 能检测到变更
+                field.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: value}));
+                field.dispatchEvent(new Event('change', {bubbles: true}));
+                field.focus();
+            }
+
+            // ===== 项目卡片点击 → 填入 ID 到输入框 =====
+            document.addEventListener('click', function(e) {
+                var card = e.target.closest('.cw-project-card');
+                if (!card) return;
+                var pid = card.getAttribute('data-project-id');
+                if (!pid) return;
+                e.preventDefault();
+                var field = _findInput('open-project-id-input');
+                if (field) {
+                    _setNativeValue(field, pid);
+                }
+            });
+        })();
+        </script>
+        """) as demo:
         # 头部
         gr.HTML("""
         <div class="cw-header">
             <h1>🎨 ComicWeaver</h1>
             <div class="subtitle">
-                多Agent协作的自动化漫画创作系统 · v0.3.0
+                多Agent协作的自动化漫画创作系统 · v0.4.0
             </div>
         </div>
         """)
 
-        with gr.Tabs():
+        with gr.Tabs() as tabs:
             # ================================================================
             # Tab 1: 📋 项目
             # ================================================================
@@ -724,7 +1020,7 @@ def build_ui() -> gr.Blocks:
                             "🚀 创建项目", variant="primary",
                             elem_classes="cw-btn-primary", size="lg",
                         )
-                        create_status = gr.Textbox(label="", interactive=False)
+                        create_status = gr.Textbox(label="", interactive=False, elem_id="create-project-status")
 
                     # 右侧：已保存项目
                     with gr.Column(scale=3):
@@ -737,10 +1033,11 @@ def build_ui() -> gr.Blocks:
                         with gr.Row():
                             open_project_id = gr.Textbox(
                                 label="输入项目ID打开", placeholder="粘贴项目ID...",
-                                scale=2,
+                                scale=2, elem_id="open-project-id-input",
                             )
                             open_btn = gr.Button(
                                 "📂 打开", scale=0, elem_classes="cw-btn-primary",
+                                elem_id="open-project-btn",
                             )
                             save_current_btn = gr.Button(
                                 "💾 保存当前", scale=0, elem_classes="cw-btn-secondary",
@@ -757,11 +1054,7 @@ def build_ui() -> gr.Blocks:
                 refresh_projects_btn.click(
                     list_projects_cards, outputs=[project_cards_html],
                 )
-                open_btn.click(
-                    open_project_by_id,
-                    inputs=[open_project_id],
-                    outputs=[create_status, project_cards_html],
-                )
+                # open_btn.click 在下方所有 Tab 定义完成后注册
                 save_current_btn.click(
                     save_current_project,
                     outputs=[create_status],
@@ -776,8 +1069,20 @@ def build_ui() -> gr.Blocks:
                 # 项目信息栏
                 project_info_html = gr.HTML(render_project_info())
 
-                # 控制栏
+                # 控制栏（含阶段选择）
                 with gr.Row():
+                    start_phase = gr.Dropdown(
+                        label="起始阶段",
+                        choices=[
+                            ("从头开始", "init"),
+                            ("剧本阶段", "script"),
+                            ("角色阶段", "character"),
+                            ("分镜阶段", "storyboard"),
+                            ("图像阶段", "image"),
+                            ("排版阶段", "layout"),
+                        ],
+                        value="init", scale=1,
+                    )
                     start_btn = gr.Button(
                         "▶ 启动工作流", variant="primary",
                         elem_classes="cw-btn-primary", size="lg", scale=2,
@@ -790,11 +1095,19 @@ def build_ui() -> gr.Blocks:
                         "💾 保存", elem_classes="cw-btn-secondary", scale=0,
                     )
 
-                # 左右分栏：流式日志 | 实时预览
+                # 左右分栏：流式日志 | 实时预览（文字+图像）
                 with gr.Row(equal_height=True):
                     with gr.Column(scale=1):
                         left_panel_html = gr.HTML(
                             render_workflow_left("", [], [], None)
+                        )
+                        # 指导输入 + 按钮组
+                        guidance_input = gr.Textbox(
+                            label="🎯 用户指导（可选）",
+                            placeholder="例如：'让角色看起来更年轻一些'、'给第二页增加一个特写镜头'...",
+                            lines=2,
+                            interactive=False,
+                            elem_classes="cw-guidance-input",
                         )
                         with gr.Row():
                             accept_btn = gr.Button(
@@ -807,7 +1120,7 @@ def build_ui() -> gr.Blocks:
                             )
                     with gr.Column(scale=1):
                         panel_preview_html = gr.HTML(
-                            render_live_panel_preview([], [])
+                            render_live_content([], [], "")
                         )
 
                 # 调试面板（折叠）
@@ -827,19 +1140,25 @@ def build_ui() -> gr.Blocks:
                         dev_refresh_btn = gr.Button("🔄 刷新", scale=0)
                     dev_html = gr.HTML()
 
-                # 输出列表
+                # 输出列表 (v0.4: 7元组)
                 wf_outputs = [
                     workflow_status, left_panel_html, panel_preview_html,
-                    project_info_html, accept_btn, regen_btn,
+                    project_info_html, accept_btn, regen_btn, guidance_input,
                 ]
 
-                start_btn.click(start_workflow, outputs=wf_outputs)
+                start_btn.click(
+                    start_workflow,
+                    inputs=[start_phase],
+                    outputs=wf_outputs,
+                )
                 accept_btn.click(
-                    lambda: (yield from respond_checkpoint("accept")),
+                    lambda g: (yield from respond_checkpoint("accept", g)),
+                    inputs=[guidance_input],
                     outputs=wf_outputs,
                 )
                 regen_btn.click(
-                    lambda: (yield from respond_checkpoint("regenerate")),
+                    lambda g: (yield from respond_checkpoint("regenerate", g)),
+                    inputs=[guidance_input],
                     outputs=wf_outputs,
                 )
                 save_wf_btn.click(
@@ -912,9 +1231,24 @@ def build_ui() -> gr.Blocks:
                     outputs=[download_btn],
                 )
 
+        # ==== 跨 Tab 事件注册（需要 Tab 2 组件已定义）====
+        _open_outputs = [create_status, project_cards_html, project_info_html,
+                         left_panel_html, panel_preview_html, start_phase, tabs]
+        open_btn.click(
+            open_project_by_id,
+            inputs=[open_project_id],
+            outputs=_open_outputs,
+        )
+        # 输入框按 Enter 也能打开项目
+        open_project_id.submit(
+            open_project_by_id,
+            inputs=[open_project_id],
+            outputs=_open_outputs,
+        )
+
         gr.HTML("""
         <div style="text-align:center;padding:16px;color:#94a3b8;font-size:12px;">
-            ComicWeaver © 2026 · v0.3.0 Claude Code Edition
+            ComicWeaver © 2026 · v0.4.0 Claude Code Edition
         </div>
         """)
 

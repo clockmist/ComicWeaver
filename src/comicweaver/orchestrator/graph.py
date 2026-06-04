@@ -112,6 +112,7 @@ class ComicWorkflow:
         self._response_event: asyncio.Event | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._last_decision: str | None = None
+        self._last_guidance: str = ""
 
         # 跨会话恢复：存储已加载的 state
         self._saved_state: ComicState | None = None
@@ -145,13 +146,14 @@ class ComicWorkflow:
         builder.add_edge("layout", END)
 
         # -- 入口：根据 resume_phase 决定从哪个节点开始 --
+        # identity 映射：resume_phase 指定直接从该节点开始（重新执行该阶段）
         phase_to_node: dict[str, str] = {
             "init": "story",
-            "story": "script",
-            "script": "character",
-            "character": "storyboard",
-            "storyboard": "image",
-            "image": "layout",
+            "story": "story",
+            "script": "script",
+            "character": "character",
+            "storyboard": "storyboard",
+            "image": "image",
             "layout": "layout",
         }
         start_node = "story"
@@ -271,7 +273,11 @@ class ComicWorkflow:
             await self._await_response()
             if self._last_decision != "regenerate":
                 break
-            # 用户选择重新生成 → 循环回到 agent 执行
+            # 用户选择重新生成 → 清除旧数据，循环回到 agent 执行
+            state["structured_script"] = {}
+            state["emotion_curve"] = []
+            if self._last_guidance:
+                writer(log_workflow_event("用户指导", self._last_guidance[:200]))
 
         elapsed = (time.perf_counter() - t0) * 1000
         writer(log_performance("script_agent", elapsed))
@@ -354,6 +360,10 @@ class ComicWorkflow:
             await self._await_response()
             if self._last_decision != "regenerate":
                 break
+            # 用户选择重新生成 → 清除旧数据
+            state["character_db"] = {}
+            if self._last_guidance:
+                writer(log_workflow_event("用户指导", self._last_guidance[:200]))
 
         elapsed = (time.perf_counter() - t0) * 1000
         writer(log_performance("character_agent", elapsed))
@@ -434,6 +444,10 @@ class ComicWorkflow:
             await self._await_response()
             if self._last_decision != "regenerate":
                 break
+            # 用户选择重新生成 → 清除旧数据
+            state["storyboard_plan"] = []
+            if self._last_guidance:
+                writer(log_workflow_event("用户指导", self._last_guidance[:200]))
 
         elapsed = (time.perf_counter() - t0) * 1000
         writer(log_performance("storyboard_agent", elapsed))
@@ -603,6 +617,11 @@ class ComicWorkflow:
             await self._await_response()
             if self._last_decision != "regenerate":
                 break
+            # 用户选择重新生成 → 清除旧数据
+            state["final_pages"] = []
+            state["exports"] = []
+            if self._last_guidance:
+                writer(log_workflow_event("用户指导", self._last_guidance[:200]))
 
         elapsed = (time.perf_counter() - t0) * 1000
         writer(log_performance("layout_agent", elapsed))
@@ -638,8 +657,10 @@ class ComicWorkflow:
             f"project={state.get('project_id', '?')}",
         )
 
+        # 每次运行使用唯一的 thread_id，避免 LangGraph MemorySaver 回放旧状态
+        run_id = f"{state.get('project_id', 'default')}_{int(time.time() * 1000)}"
         config: dict[str, Any] = {
-            "configurable": {"thread_id": state.get("project_id", "default")}
+            "configurable": {"thread_id": run_id}
         }
         self._current_config = config
         prev_phase = state.get("current_phase", "init")
@@ -695,12 +716,14 @@ class ComicWorkflow:
         self._response_event = asyncio.Event()
         await self._response_event.wait()
 
-    def respond(self, decision: str) -> None:
+    def respond(self, decision: str, guidance: str = "") -> None:
         """由 UI 线程调用，恢复暂停的工作流。
 
         使用 call_soon_threadsafe 安全地通知后台 asyncio 事件循环。
+        guidance: 用户可选的指导信息，用于 regenerate 时传递给 agent。
         """
         self._last_decision = decision
+        self._last_guidance = guidance
         if self._response_event and self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(self._response_event.set)
 
@@ -708,7 +731,8 @@ class ComicWorkflow:
     def from_saved_project(cls, project_id: str) -> "ComicWorkflow | None":
         """从已保存的项目创建可恢复的 ComicWorkflow。
 
-        加载 project.json，读取 current_phase，构造从对应节点开始的工作流。
+        加载 project.json，读取 current_phase，从下一个阶段继续执行
+        （如 current_phase="character" → 从 storyboard 继续）。
         返回 None 表示项目不存在或无法加载。
         """
         from comicweaver.storage import load_project, project_to_state
@@ -717,7 +741,17 @@ class ComicWorkflow:
             return None
         state = project_to_state(project)
         phase = state.get("current_phase", "init")
-        wf = cls(resume_phase=phase)
+        # 计算下一个阶段：已完成的 phase → 从下一个 phase 开始
+        _next_phase: dict[str, str] = {
+            "init": "script",
+            "script": "character",
+            "character": "storyboard",
+            "storyboard": "image",
+            "image": "layout",
+            "layout": "layout",
+        }
+        resume_phase = _next_phase.get(phase, "script")
+        wf = cls(resume_phase=resume_phase)
         wf._saved_state = state
         return wf
 

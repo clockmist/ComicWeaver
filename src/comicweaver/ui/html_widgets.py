@@ -680,12 +680,12 @@ def render_project_info(state: dict | None = None) -> str:
 
     return f"""
     <div style="display:flex;align-items:center;gap:16px;padding:10px 16px;
-                background:linear-gradient(135deg,#1e293b 0%,#334155 100%);
-                border-radius:10px;color:white;font-size:13px;">
+                background:#f0f4ff;border:1px solid #cbd5e1;
+                border-radius:10px;color:#1e293b;font-size:13px;">
         <div style="font-weight:700;font-size:15px;">📋 {html.escape(title)}</div>
-        <div style="opacity:0.7;font-size:11px;font-family:monospace;">ID: {html.escape(pid)}</div>
+        <div style="color:#64748b;font-size:11px;font-family:monospace;">ID: {html.escape(pid)}</div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-            <span style="background:rgba(255,255,255,0.15);padding:3px 10px;border-radius:12px;
+            <span style="background:#dbeafe;color:#1e40af;padding:3px 10px;border-radius:12px;
                          font-size:11px;">📌 {html.escape(phase_label)}</span>
         </div>
     </div>
@@ -1220,8 +1220,11 @@ _PHASE_AGENTS_V3 = [
 ]
 
 
-def render_agent_status_bar(active: str, done: list[str]) -> str:
-    """紧凑型 Agent 状态条 — 水平排列的圆点 + 标签。"""
+def render_agent_status_bar(active: str, done: list[str], elapsed_s: float = 0.0) -> str:
+    """紧凑型 Agent 状态条 — 水平排列的圆点 + 标签。
+
+    elapsed_s: 当前活跃 agent 的已运行秒数（仅 active 时显示）。
+    """
     pills = []
     for agent_id, label in _PHASE_AGENTS_V3:
         if agent_id == active:
@@ -1238,9 +1241,19 @@ def render_agent_status_bar(active: str, done: list[str]) -> str:
             f'{dot} {label}'
             f'</span>'
         )
+
+    elapsed_html = ""
+    if active and elapsed_s > 0:
+        if elapsed_s < 60:
+            elapsed_str = f"{elapsed_s:.0f}s"
+        else:
+            elapsed_str = f"{elapsed_s/60:.1f}min"
+        elapsed_html = f'<span class="cw-elapsed active">⏱ {elapsed_str}</span>'
+
     return f"""
     <div class="cw-agent-status">
         {''.join(pills)}
+        {elapsed_html}
     </div>
     """
 
@@ -1325,8 +1338,7 @@ def render_project_cards(projects: list[dict]) -> str:
         phase_label = phase_labels.get(phase, phase)
 
         cards.append(f"""
-        <div class="cw-project-card" onclick="document.dispatchEvent(
-            new CustomEvent('cw-select-project', {{detail: '{html.escape(pid)}'}}))">
+        <div class="cw-project-card" data-project-id="{html.escape(pid)}" role="button" tabindex="0">
             <div class="cw-project-card-title">{html.escape(title)}</div>
             <div class="cw-project-card-id">{html.escape(pid)}</div>
             <div class="cw-project-card-meta">
@@ -1348,18 +1360,46 @@ def render_workflow_left(
     done: list[str],
     events: list[dict],
     checkpoint: dict | None,
+    elapsed_s: float = 0.0,
+    current_phase: str | None = None,
 ) -> str:
-    """组合渲染工作流左栏：状态条 + 流式日志 + checkpoint。"""
-    status = render_agent_status_bar(active, done)
+    """组合渲染工作流左栏：阶段跳转 + 状态条 + 流式日志 + checkpoint。"""
+    if current_phase is None:
+        current_phase = _agent_to_phase(active, done)
+    phase_jump = render_phase_jump_buttons(current_phase, done)
+    status = render_agent_status_bar(active, done, elapsed_s)
     log = render_stream_log(events)
     cp = render_inline_checkpoint(checkpoint)
     return f"""
     <div class="cw-workflow-left">
+        {phase_jump}
         {status}
         {log}
         {cp}
     </div>
     """
+
+
+def _agent_to_phase(active: str, done: list[str]) -> str:
+    """根据活跃/已完成 agent 推断当前阶段。"""
+    agent_to_phase = {
+        "script_agent": "script",
+        "character_agent": "character",
+        "storyboard_agent": "storyboard",
+        "image_agent": "image",
+        "layout_agent": "layout",
+    }
+    if active and active in agent_to_phase:
+        return agent_to_phase[active]
+    # 返回最后完成的阶段
+    phase_order = ["script", "character", "storyboard", "image", "layout"]
+    reverse_agents = {v: k for k, v in agent_to_phase.items()}
+    last_phase = "init"
+    for phase in phase_order:
+        agent = reverse_agents.get(phase, "")
+        if agent in done:
+            last_phase = phase
+    return last_phase
 
 
 def render_inline_checkpoint(checkpoint: dict | None) -> str:
@@ -1383,6 +1423,606 @@ def render_inline_checkpoint(checkpoint: dict | None) -> str:
             ⏸ <strong>{html.escape(label)}</strong>
         </div>
         <div class="cw-checkpoint-meta">{items}</div>
-        <div class="cw-checkpoint-hint">请在上方按钮中选择「接受并继续」或「重新生成」</div>
+        <div class="cw-checkpoint-hint">
+            请选择「接受并继续」或「重新生成」。你可以在下方输入框中提供具体的修改指导。
+        </div>
+    </div>
+    """
+
+
+# ============================================================================
+# v0.4 新增：阶段跳转、文字内容展示、指导信息
+# ============================================================================
+
+_PHASE_ORDER = ["init", "script", "character", "storyboard", "image", "layout"]
+_PHASE_LABELS: dict[str, str] = {
+    "init": "初始",
+    "script": "剧本",
+    "character": "角色",
+    "storyboard": "分镜",
+    "image": "图像",
+    "layout": "排版",
+}
+
+
+def render_phase_jump_buttons(current_phase: str, done_agents: list[str] | None = None) -> str:
+    """渲染阶段跳转按钮组 — 允许用户查看/跳到特定阶段。
+
+    当前阶段高亮，已完成阶段可点击，未完成阶段禁用。
+    """
+    if done_agents is None:
+        done_agents = []
+
+    # 将 done_agents 映射到 phase
+    agent_to_phase = {
+        "script_agent": "script",
+        "character_agent": "character",
+        "storyboard_agent": "storyboard",
+        "image_agent": "image",
+        "layout_agent": "layout",
+    }
+    done_phases = {"init"}
+    for a in done_agents:
+        if a in agent_to_phase:
+            done_phases.add(agent_to_phase[a])
+
+    buttons = []
+    for phase in _PHASE_ORDER:
+        label = _PHASE_LABELS.get(phase, phase)
+        if phase == current_phase:
+            cls = "current"
+        elif phase in done_phases:
+            cls = ""
+        else:
+            cls = "disabled"
+        data_phase = phase
+        buttons.append(
+            f'<span class="cw-phase-jump-btn {cls}" '
+            f'data-phase="{html.escape(data_phase)}">{html.escape(label)}</span>'
+        )
+
+    return f"""
+    <div class="cw-phase-jump-bar">
+        <span class="cw-phase-jump-label">阶段:</span>
+        {"".join(buttons)}
+    </div>
+    """
+
+
+def render_phase_text_content(state: dict | None, agent_outputs: dict[str, list[dict]]) -> str:
+    """根据当前 state 和 agent_outputs 渲染所有已完成阶段的详细文字内容。
+
+    用户需要足够信息来判断是否重新生成该阶段。
+    """
+    if not state:
+        return '<div class="cw-phase-text-empty">尚未创建项目</div>'
+
+    parts: list[str] = []
+
+    # 解析角色名映射（供分镜/排版阶段引用）
+    character_db = state.get("character_db", {})
+    char_id_to_name: dict[str, str] = {}
+    if character_db:
+        for cid, cp in character_db.get("characters", {}).items():
+            char_id_to_name[cid] = cp.get("name", cid)
+
+    # 剧本阶段完成 → 显示完整剧本
+    script = state.get("structured_script", {})
+    if script:
+        parts.append(_render_detailed_script(script, char_id_to_name))
+
+    # 角色阶段完成 → 显示完整角色特征
+    if character_db:
+        parts.append(_render_detailed_characters(character_db))
+
+    # 分镜阶段完成 → 显示每页每格的详细信息
+    storyboard = state.get("storyboard_plan", [])
+    if storyboard:
+        parts.append(_render_detailed_storyboard(storyboard, char_id_to_name))
+
+    # 图像阶段完成 → 显示每张图的生成参数
+    panel_images = state.get("panel_images", [])
+    if panel_images:
+        parts.append(_render_detailed_images(panel_images))
+
+    # 排版阶段完成 → 显示布局和最终图片
+    final_pages = state.get("final_pages", [])
+    if final_pages:
+        parts.append(_render_detailed_final_pages(final_pages, storyboard))
+
+    if not parts:
+        return '<div class="cw-phase-text-empty">等待工作流启动...</div>'
+
+    return "".join(parts)
+
+
+# ============================================================================
+# 详细渲染辅助函数
+# ============================================================================
+
+def _resolve_char_name(char_id: str, char_map: dict[str, str]) -> str:
+    """将角色ID解析为显示名称。"""
+    return char_map.get(char_id, char_id)
+
+
+def _render_detailed_script(script: dict, char_map: dict[str, str]) -> str:
+    """渲染完整剧本：每个场景的叙述、对话、动作。"""
+    title = html.escape(script.get("title", "未命名"))
+    summary = html.escape((script.get("summary", "") or ""))
+    genres = script.get("genre", [])
+    scenes = script.get("scenes", [])
+    characters = script.get("characters", [])
+
+    genre_tags = " ".join(
+        f'<span class="cw-badge">{html.escape(str(g))}</span>' for g in genres
+    )
+
+    # 角色列表
+    char_list = ""
+    for c in characters:
+        name = html.escape(c.get("name", "?"))
+        role = html.escape(c.get("role", "?"))
+        appearance = html.escape((c.get("appearance") or "")[:60])
+        personality = html.escape((c.get("personality") or "")[:60])
+        char_list += (
+            f'<div class="cw-phase-text-scene">'
+            f'<b>{name}</b> <span class="cw-badge">{role}</span>'
+            + (f'<br><span style="color:#64748b;">外貌: {appearance}</span>' if appearance else "")
+            + (f'<br><span style="color:#64748b;">性格: {personality}</span>' if personality else "")
+            + f'</div>'
+        )
+
+    # 场景详情
+    scene_items = ""
+    for s in scenes:
+        idx = s.get("order", s.get("scene_index", "?"))
+        loc = html.escape(s.get("location", "?"))
+        time_of_day = html.escape(s.get("time_of_day", ""))
+        atmosphere = html.escape(s.get("atmosphere", ""))
+        narration = html.escape((s.get("narration") or "")[:150])
+        emotion = s.get("emotion_intensity", 0)
+
+        # 角色
+        chars_in_scene = s.get("characters_present", [])
+        char_display = ", ".join(
+            html.escape(_resolve_char_name(cid, char_map))
+            for cid in chars_in_scene
+        ) if chars_in_scene else "无"
+
+        # 动作
+        actions = s.get("actions", [])
+        action_items = ""
+        for a in actions:
+            actor = html.escape(_resolve_char_name(a.get("actor", "?"), char_map))
+            desc = html.escape(a.get("description", "")[:80])
+            action_items += f'<div style="margin-left:8px;">🎬 <b>{actor}</b>: {desc}</div>'
+
+        # 对话
+        dialogues = s.get("dialogues", [])
+        dialogue_items = ""
+        for d in dialogues:
+            speaker = html.escape(_resolve_char_name(d.get("speaker", "?"), char_map))
+            text = html.escape(d.get("text", "")[:120])
+            tone = html.escape(d.get("tone", ""))
+            is_thought = d.get("is_thought", False)
+            bubble_icon = "💭" if is_thought else "💬"
+            tone_badge = f' <span class="cw-badge">{tone}</span>' if tone else ""
+            dialogue_items += (
+                f'<div style="margin-left:8px;">{bubble_icon} <b>{speaker}</b>{tone_badge}: {text}</div>'
+            )
+
+        scene_items += f"""
+        <div class="cw-phase-text-scene">
+            <b>场景 {idx}</b> · {loc}
+            {f' · {time_of_day}' if time_of_day else ''}
+            {f' · {atmosphere}' if atmosphere else ''}
+            <span style="float:right;font-size:10px;color:#94a3b8;">情绪 {emotion:.2f}</span>
+            {f'<div style="color:#64748b;font-style:italic;">📢 {narration}</div>' if narration else ''}
+            <div style="font-size:11px;color:#64748b;">角色: {char_display}</div>
+            {action_items}
+            {dialogue_items}
+        </div>
+        """
+
+    return f"""
+    <div class="cw-phase-text-panel">
+        <h4>📝 剧本: {title}</h4>
+        <div class="cw-phase-text-scroll">
+        <div class="cw-phase-text-item" style="margin-bottom:6px;">{summary}</div>
+        <div class="cw-phase-text-item">{genre_tags}</div>
+        <div class="cw-phase-text-item" style="margin-top:4px;">
+            <span class="key">场景数:</span> <span class="val">{len(scenes)}</span>
+            &nbsp;&nbsp;<span class="key">角色数:</span> <span class="val">{len(characters)}</span>
+        </div>
+        <details style="margin-top:6px;">
+            <summary style="cursor:pointer;color:#3b82f6;font-size:13px;font-weight:600;">
+                👥 角色详情 ({len(characters)}人)
+            </summary>
+            {char_list}
+        </details>
+        <details style="margin-top:4px;" open>
+            <summary style="cursor:pointer;color:#3b82f6;font-size:13px;font-weight:600;">
+                🎬 场景详情 ({len(scenes)}场)
+            </summary>
+            {scene_items}
+        </details>
+        </div>
+    </div>
+    """
+
+
+def _render_detailed_characters(character_db: dict) -> str:
+    """渲染完整角色设计：外貌特征、标签、参考图。"""
+    characters = character_db.get("characters", {})
+    if not characters:
+        return ""
+
+    items = ""
+    for cid, cp in characters.items():
+        name = html.escape(cp.get("name", cid))
+        gender = html.escape(cp.get("gender_tag", ""))
+        appearance_prompt = html.escape((cp.get("appearance_prompt") or "")[:200])
+        core_tags = html.escape((cp.get("core_tags") or "")[:200])
+        seed = cp.get("seed", 0)
+
+        # 结构化外貌特征
+        traits = cp.get("visual_traits", {})
+        hair = html.escape(str(traits.get("hair", ""))[:40]) if traits.get("hair") else ""
+        eyes = html.escape(str(traits.get("eyes", ""))[:40]) if traits.get("eyes") else ""
+        body = html.escape(str(traits.get("body", ""))[:40]) if traits.get("body") else ""
+        clothing = html.escape(str(traits.get("clothing", ""))[:40]) if traits.get("clothing") else ""
+        distinctive = traits.get("distinctive", [])
+        distinctive_str = ", ".join(html.escape(str(d)[:30]) for d in distinctive) if distinctive else ""
+
+        trait_rows = ""
+        if hair:
+            trait_rows += f'<div><span class="key">发型:</span> <span class="val">{hair}</span></div>'
+        if eyes:
+            trait_rows += f'<div><span class="key">眼睛:</span> <span class="val">{eyes}</span></div>'
+        if body:
+            trait_rows += f'<div><span class="key">身材:</span> <span class="val">{body}</span></div>'
+        if clothing:
+            trait_rows += f'<div><span class="key">服装:</span> <span class="val">{clothing}</span></div>'
+        if distinctive_str:
+            trait_rows += f'<div><span class="key">特征:</span> <span class="val">{distinctive_str}</span></div>'
+
+        # 参考图
+        ref = cp.get("base_reference", {})
+        img_path = ref.get("image_path", "")
+        img_html = ""
+        if img_path and os.path.exists(str(img_path)):
+            safe_path = _gradio_img_src(str(img_path))
+            img_html = (
+                f'<img src="/gradio_api/file={html.escape(safe_path)}" '
+                f'style="max-width:120px;max-height:160px;border:1px solid #e2e8f0;'
+                f'border-radius:6px;margin:4px 0;" alt="{name} 参考图"/>'
+            )
+
+        items += f"""
+        <div class="cw-phase-text-scene">
+            <b>{name}</b>
+            {f' <span class="cw-badge">{gender}</span>' if gender else ''}
+            {f' <span class="cw-badge" style="background:#f1f5f9;color:#64748b;">种子: {seed}</span>' if seed else ''}
+            {img_html}
+            {f'<div style="font-size:11px;color:#475569;margin-top:4px;">{trait_rows}</div>' if trait_rows else ''}
+            {f'<div style="font-size:10px;color:#94a3b8;margin-top:2px;">标签: {core_tags}</div>' if core_tags else ''}
+            {f'<div style="font-size:10px;color:#94a3b8;">描述: {appearance_prompt}</div>' if appearance_prompt else ''}
+        </div>
+        """
+
+    return f"""
+    <div class="cw-phase-text-panel">
+        <h4>👤 角色设计 ({len(characters)}人)</h4>
+        <div class="cw-phase-text-scroll">
+        {items}
+        </div>
+    </div>
+    """
+
+
+def _render_detailed_storyboard(storyboard: list[dict], char_map: dict[str, str]) -> str:
+    """渲染完整分镜规划：每页每格的对话、动作、角色、镜头。"""
+    if not storyboard:
+        return ""
+
+    total_panels = sum(len(p.get("panels", [])) for p in storyboard)
+    pages_html = ""
+
+    for p in storyboard:
+        page_num = p.get("page_number", "?")
+        template = html.escape(p.get("layout_template", ""))
+        layout_hint = html.escape(p.get("layout_hint", ""))
+        panels = p.get("panels", [])
+        is_climax = p.get("is_climax_page", False)
+        climax_mark = ' 🔥 高潮页' if is_climax else ''
+        emotion_avg = p.get("page_emotion_avg", 0)
+
+        # 每个面板的详细信息
+        panel_items = ""
+        for pn in panels:
+            pid = html.escape(pn.get("panel_id", "?"))
+            order = pn.get("order_in_page", "?")
+            shot = html.escape(pn.get("shot_size", "?"))
+            angle = html.escape(pn.get("camera_angle", "?"))
+            shape = html.escape(pn.get("shape", "rectangle"))
+            action = html.escape((pn.get("primary_action") or "")[:100])
+            pose = html.escape((pn.get("pose_hint") or "")[:80])
+            expression = html.escape((pn.get("expression") or "")[:80])
+            setting = html.escape((pn.get("setting") or "")[:60])
+            mood = html.escape(pn.get("mood", ""))
+            lighting = html.escape((pn.get("scene_lighting") or "")[:60])
+            weather = html.escape((pn.get("weather") or "")[:30])
+            time_of_day = html.escape((pn.get("time_of_day") or "")[:30])
+            emotion = pn.get("emotion_intensity", 0)
+
+            # 此面板中的角色
+            chars_in_panel = pn.get("characters_in_panel", [])
+            char_display = ", ".join(
+                html.escape(_resolve_char_name(cid, char_map))
+                for cid in chars_in_panel
+            ) if chars_in_panel else "无"
+
+            # 此面板中的对话
+            dialogues = pn.get("dialogues_in_panel", [])
+            dialogue_items = ""
+            for d in dialogues:
+                speaker = html.escape(_resolve_char_name(d.get("speaker", "?"), char_map))
+                text = html.escape(d.get("text", "")[:100])
+                tone = html.escape(d.get("tone", ""))
+                is_thought = d.get("is_thought", False)
+                icon = "💭" if is_thought else "💬"
+                tone_tag = f' [{tone}]' if tone else ""
+                dialogue_items += (
+                    f'<div style="margin-left:4px;font-size:11px;">'
+                    f'{icon} <b>{speaker}</b>{tone_tag}: {text}</div>'
+                )
+
+            # 气泡提示
+            bubble_hints = pn.get("speech_bubble_hints", [])
+            bubble_items = ""
+            if bubble_hints:
+                for bh in bubble_hints[:3]:
+                    btype = html.escape(bh.get("bubble_type", "speech"))
+                    pos = html.escape(bh.get("suggested_position", "auto"))
+                    bubble_items += f'<span class="cw-badge" style="font-size:9px;">{btype}@{pos}</span> '
+
+            panel_items += f"""
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;
+                        padding:6px 8px;margin:4px 0;font-size:11px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <b>{pid}</b> (第{order}格)
+                    <span style="font-size:10px;color:#94a3b8;">情绪 {emotion:.2f}</span>
+                </div>
+                <div style="color:#475569;margin:2px 0;">
+                    <span class="cw-badge">{shot}</span>
+                    <span class="cw-badge">{angle}</span>
+                    <span class="cw-badge" style="background:#e0e7ff;color:#3730a3;">{shape}</span>
+                    {f'<span class="cw-badge" style="background:#fef3c7;color:#92400e;">{mood}</span>' if mood else ''}
+                </div>
+                {f'<div><span class="key">场景:</span> {setting}</div>' if setting else ''}
+                {f'<div><span class="key">光照:</span> {lighting}' + (f' · {weather}' if weather else '') + (f' · {time_of_day}' if time_of_day else '') + '</div>' if (lighting or weather or time_of_day) else ''}
+                <div><span class="key">角色:</span> {char_display}</div>
+                {f'<div><span class="key">动作:</span> {action}</div>' if action else ''}
+                {f'<div><span class="key">姿势:</span> {pose}</div>' if pose else ''}
+                {f'<div><span class="key">表情:</span> {expression}</div>' if expression else ''}
+                {f'<div style="margin-top:2px;">{dialogue_items}</div>' if dialogue_items else ''}
+                {f'<div style="margin-top:2px;">💭气泡: {bubble_items}</div>' if bubble_items else ''}
+            </div>
+            """
+
+        pages_html += f"""
+        <div style="margin-bottom:8px;">
+            <div style="font-weight:600;color:#1e293b;font-size:13px;margin-bottom:4px;
+                        padding:4px 8px;background:#e2e8f0;border-radius:4px;">
+                第 {page_num} 页 · {template}
+                {f' · {layout_hint}' if layout_hint else ''}
+                {climax_mark}
+                <span style="font-weight:normal;font-size:11px;color:#64748b;">
+                    ({len(panels)}格 · 平均情绪 {emotion_avg:.2f})
+                </span>
+            </div>
+            {panel_items}
+        </div>
+        """
+
+    return f"""
+    <div class="cw-phase-text-panel">
+        <h4>🎬 分镜规划 ({len(storyboard)}页 / {total_panels}格)</h4>
+        <div class="cw-phase-text-scroll">
+        {pages_html}
+        </div>
+    </div>
+    """
+
+
+def _render_detailed_images(panel_images: list[dict]) -> str:
+    """渲染每张面板图像的生成详情：提示词、种子、参数。"""
+    if not panel_images:
+        return ""
+
+    backends: dict[str, int] = {}
+    total_time = 0
+    for pi in panel_images:
+        backend = pi.get("backend", "?")
+        backends[backend] = backends.get(backend, 0) + 1
+        total_time += pi.get("generation_time_ms", 0)
+
+    backend_str = " · ".join(f"{k}: {v}张" for k, v in backends.items())
+    avg_time = total_time / len(panel_images) if panel_images else 0
+    time_str = f"{avg_time/1000:.1f}s" if avg_time >= 1000 else f"{avg_time:.0f}ms"
+
+    # 每张面板的详情（可折叠）
+    panel_items = ""
+    for pi in panel_images:
+        pid = html.escape(pi.get("panel_id", "?"))
+        backend = html.escape(pi.get("backend", "?"))
+        seed = pi.get("seed", 0)
+        steps = pi.get("steps", 0)
+        cfg = pi.get("cfg_scale", 0)
+        gen_time = pi.get("generation_time_ms", 0)
+        gen_str = f"{gen_time/1000:.1f}s" if gen_time >= 1000 else f"{gen_time:.0f}ms"
+        prompt = html.escape((pi.get("prompt_used") or "")[:300])
+        neg_prompt = html.escape((pi.get("negative_prompt_used") or "")[:200])
+        chars = pi.get("characters_present", [])
+        char_str = ", ".join(html.escape(str(c)) for c in chars) if chars else "无"
+
+        # 缩略图
+        img_path = pi.get("image_path", "")
+        img_html = ""
+        if img_path and os.path.exists(str(img_path)):
+            safe_path = _gradio_img_src(str(img_path))
+            img_html = (
+                f'<img src="/gradio_api/file={html.escape(safe_path)}" '
+                f'style="max-width:100%;max-height:160px;border:1px solid #e2e8f0;'
+                f'border-radius:4px;margin:4px 0;" alt="{pid}" loading="lazy"/>'
+            )
+
+        panel_items += f"""
+        <details style="margin:2px 0;font-size:11px;">
+            <summary style="cursor:pointer;color:#3b82f6;font-weight:500;">
+                {pid} · {backend} · ⏱{gen_str} · 🌱{seed}
+            </summary>
+            <div style="padding:4px 8px;background:#f8fafc;border-radius:4px;">
+                {img_html}
+                <div><span class="key">角色:</span> {char_str}</div>
+                <div><span class="key">参数:</span> steps={steps} cfg={cfg}</div>
+                <div style="font-size:10px;color:#64748b;max-height:60px;overflow-y:auto;">
+                    <span class="key">正向提示词:</span> {prompt}
+                </div>
+                {f'<div style="font-size:10px;color:#94a3b8;max-height:40px;overflow-y:auto;"><span class="key">负向:</span> {neg_prompt}</div>' if neg_prompt else ''}
+            </div>
+        </details>
+        """
+
+    return f"""
+    <div class="cw-phase-text-panel">
+        <h4>🎨 图像生成 ({len(panel_images)}张面板)</h4>
+        <div class="cw-phase-text-scroll">
+        <div class="cw-phase-text-item">
+            <span class="key">后端分布:</span> <span class="val">{backend_str}</span>
+            &nbsp;&nbsp;<span class="key">平均耗时:</span> <span class="val">{time_str}/张</span>
+        </div>
+        <div style="margin-top:4px;">
+            {panel_items}
+        </div>
+        </div>
+    </div>
+    """
+
+
+def _render_detailed_final_pages(final_pages: list[dict], storyboard: list[dict]) -> str:
+    """渲染完整排版结果：布局网格、对话气泡、最终图片。"""
+    if not final_pages:
+        return ""
+
+    # 从分镜中提取布局信息
+    storyboard_by_page: dict[str, dict] = {}
+    for p in storyboard:
+        pid = p.get("page_id", "")
+        if pid:
+            storyboard_by_page[pid] = p
+
+    items = ""
+    for fp in final_pages:
+        page_num = fp.get("page_number", "?")
+        page_id = html.escape(fp.get("page_id", "?"))
+        w = fp.get("width_px", 0)
+        h = fp.get("height_px", 0)
+
+        # 从分镜获取布局信息
+        sb = storyboard_by_page.get(fp.get("page_id", ""), {})
+        panels_in_page = sb.get("panels", [])
+        panel_count = len(panels_in_page)
+        # 推断网格布局
+        grid_desc = _infer_grid(panel_count)
+
+        # 布局警告
+        warnings = fp.get("layout_warnings", [])
+        warn_html = ""
+        if warnings:
+            warn_items = "".join(
+                f'<div style="color:#f59e0b;font-size:10px;">⚠ {html.escape(str(w)[:100])}</div>'
+                for w in warnings[:3]
+            )
+            warn_html = f'<div style="margin:4px 0;">{warn_items}</div>'
+
+        # 气泡详情
+        bubbles = fp.get("bubbles", [])
+        bubble_html = ""
+        if bubbles:
+            bubble_items = ""
+            for b in bubbles[:8]:
+                btype = html.escape(b.get("bubble_type", "speech"))
+                text = html.escape((b.get("text") or "")[:60])
+                font_size = b.get("font_size_pt", 12)
+                occlusion = b.get("occlusion_score", 0)
+                occ_color = "#10b981" if occlusion < 0.3 else ("#f59e0b" if occlusion < 0.7 else "#ef4444")
+                bubble_items += (
+                    f'<div style="font-size:10px;margin:1px 0;">'
+                    f'<span class="cw-badge" style="font-size:9px;">{btype}</span>'
+                    f' {text}'
+                    f' <span style="color:{occ_color};">(遮挡:{occlusion:.2f})</span>'
+                    f' <span style="color:#94a3b8;">字号:{font_size}pt</span>'
+                    f'</div>'
+                )
+            bubble_html = f"""
+            <details style="margin-top:4px;font-size:11px;">
+                <summary style="cursor:pointer;color:#3b82f6;">💬 对话气泡 ({len(bubbles)}个)</summary>
+                {bubble_items}
+            </details>
+            """
+
+        # 最终图片
+        img_path = fp.get("image_path", "")
+        img_html = ""
+        if img_path and os.path.exists(str(img_path)):
+            safe_path = _gradio_img_src(str(img_path))
+            img_html = (
+                f'<a href="/gradio_api/file={html.escape(safe_path)}" target="_blank">'
+                f'<img src="/gradio_api/file={html.escape(safe_path)}" '
+                f'style="max-width:100%;max-height:200px;border:1px solid #e2e8f0;'
+                f'border-radius:6px;margin:4px 0;cursor:zoom-in;" '
+                f'alt="第{page_num}页" loading="lazy"/>'
+                f'</a>'
+            )
+
+        items += f"""
+        <div class="cw-phase-text-scene">
+            <b>第 {page_num} 页</b> · {w}×{h}px · {grid_desc} ({panel_count}格)
+            {img_html}
+            {warn_html}
+            {bubble_html}
+        </div>
+        """
+
+    return f"""
+    <div class="cw-phase-text-panel">
+        <h4>📐 排版完成 ({len(final_pages)}页)</h4>
+        <div class="cw-phase-text-scroll">
+        {items}
+        </div>
+    </div>
+    """
+
+
+def _infer_grid(panel_count: int) -> str:
+    """根据面板数量推断网格布局名称。"""
+    mapping = {1: "1×1", 2: "1×2 或 2×1", 3: "1×3 或 L形",
+               4: "2×2", 5: "2×3(少1)", 6: "2×3", 7: "2×4(少1)", 8: "2×4"}
+    return mapping.get(panel_count, f"{panel_count}格")
+
+
+def render_live_content(
+    panel_images: list[dict],
+    character_images: list[dict],
+    text_html: str,
+) -> str:
+    """渲染创作Tab右侧面板：文字内容 + 图像预览。"""
+    image_preview = render_live_panel_preview(panel_images, character_images)
+
+    return f"""
+    <div class="cw-live-content">
+        {text_html}
+        {image_preview}
     </div>
     """
