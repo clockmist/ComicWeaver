@@ -137,7 +137,8 @@ async def _consume_workflow(session: Session) -> None:
                     # 更新 current_phase
                     agent_to_phase = {
                         "story_agent": "story",
-                        "script_agent": "script", "character_agent": "character",
+                        "character_agent": "character",
+                        "script_agent": "script",
                         "storyboard_agent": "storyboard", "image_agent": "image",
                         "layout_agent": "layout",
                     }
@@ -349,8 +350,8 @@ def create_project(
 _PHASE_PREREQUISITES: dict[str, list[str]] = {
     "init": [],
     "story": [],
-    "script": ["developed_story"],
-    "character": ["structured_script"],
+    "character": ["developed_story"],
+    "script": ["developed_story", "character_db"],
     "storyboard": ["structured_script", "character_db"],
     "image": ["structured_script", "character_db", "storyboard_plan"],
     "layout": ["structured_script", "character_db", "storyboard_plan", "panel_images"],
@@ -369,13 +370,14 @@ _PHASE_CLEAR_FIELDS: dict[str, list[str]] = {
         "storyboard_plan", "layout_grids", "panel_images", "generation_metadata",
         "final_pages", "exports",
     ],
-    "script": [
-        "structured_script", "emotion_curve", "character_db", "reference_chain",
+    "character": [
+        "character_db", "reference_chain",
+        "structured_script", "emotion_curve",
         "storyboard_plan", "layout_grids", "panel_images", "generation_metadata",
         "final_pages", "exports",
     ],
-    "character": [
-        "character_db", "reference_chain",
+    "script": [
+        "structured_script", "emotion_curve",
         "storyboard_plan", "layout_grids", "panel_images", "generation_metadata",
         "final_pages", "exports",
     ],
@@ -875,9 +877,9 @@ def open_project_by_id(project_id: str) -> tuple[str, str, str, str, str, str, d
     # 自动设置 start_phase 为下一阶段（半自动模式下继续工作流）
     _next_phase: dict[str, str] = {
         "init": "story",
-        "story": "script",
-        "script": "character",
-        "character": "storyboard",
+        "story": "character",
+        "character": "script",
+        "script": "storyboard",
         "storyboard": "image",
         "image": "layout",
         "layout": "layout",
@@ -1090,8 +1092,8 @@ def build_ui() -> gr.Blocks:
                         choices=[
                             ("从头开始", "init"),
                             ("故事阶段", "story"),
-                            ("剧本阶段", "script"),
                             ("角色阶段", "character"),
+                            ("剧本阶段", "script"),
                             ("分镜阶段", "storyboard"),
                             ("图像阶段", "image"),
                             ("排版阶段", "layout"),

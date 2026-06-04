@@ -1214,8 +1214,8 @@ def _render_page_svg(page_data: dict) -> str:
 
 _PHASE_AGENTS_V3 = [
     ("story_agent", "📖 故事"),
-    ("script_agent", "📝 剧本"),
     ("character_agent", "👤 角色"),
+    ("script_agent", "📝 剧本"),
     ("storyboard_agent", "🎬 分镜"),
     ("image_agent", "🎨 图像"),
     ("layout_agent", "📐 排版"),
@@ -1437,7 +1437,7 @@ def render_inline_checkpoint(checkpoint: dict | None) -> str:
 # v0.4 新增：阶段跳转、文字内容展示、指导信息
 # ============================================================================
 
-_PHASE_ORDER = ["init", "story", "script", "character", "storyboard", "image", "layout"]
+_PHASE_ORDER = ["init", "story", "character", "script", "storyboard", "image", "layout"]
 _PHASE_LABELS: dict[str, str] = {
     "init": "初始",
     "story": "故事",
