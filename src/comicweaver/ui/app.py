@@ -65,6 +65,7 @@ class Session:
         self.agent_outputs: dict[str, list[dict]] = {}  # agent_id -> [output dicts]
         self.dev_log: list[dict] = []                    # DevLogEntry dicts
         self.panel_images_preview: list[dict] = []       # 实时面板预览
+        self.character_preview: list[dict] = []          # 角色人设图预览
         # asyncio 资源
         self._task: asyncio.Task | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -81,6 +82,7 @@ class Session:
         self.agent_outputs = {}
         self.dev_log = []
         self.panel_images_preview = []
+        self.character_preview = []
         self._task = None
         self._loop = None
 
@@ -198,6 +200,20 @@ async def _consume_workflow(session: Session) -> None:
                             "output": content,
                             "timestamp": msg.timestamp,
                         })
+                        # 实时预览：角色人设图
+                        if agent_name == "character_agent" and "character_db" in content:
+                            cdb = content.get("character_db") or {}
+                            chars = cdb.get("characters", {})
+                            for cid, cp in chars.items():
+                                ref = cp.get("base_reference", {})
+                                img_path = ref.get("image_path", "")
+                                if img_path:
+                                    session.character_preview.append({
+                                        "kind": "character",
+                                        "char_id": cid,
+                                        "name": cp.get("name", cid),
+                                        "image_path": img_path,
+                                    })
                         # 实时面板预览：image_agent 完成时收集图像
                         if agent_name == "image_agent" and "panel_image" in content:
                             session.panel_images_preview.append(content["panel_image"])
@@ -297,7 +313,7 @@ def start_workflow() -> Iterator[tuple]:
         yield (
             "❌ 请先在「📋 项目」Tab 创建或打开项目",
             render_workflow_left("", [], [], None),
-            render_live_panel_preview([]),
+            render_live_panel_preview([], []),
             render_project_info(),
             gr.update(interactive=False),
             gr.update(interactive=False),
@@ -316,6 +332,7 @@ def start_workflow() -> Iterator[tuple]:
     SESSION.workflow_done = False
     SESSION.last_checkpoint = None
     SESSION.panel_images_preview = []
+    SESSION.character_preview = []
 
     loop = _ensure_loop(SESSION)
     SESSION._task = asyncio.run_coroutine_threadsafe(
@@ -329,7 +346,7 @@ def start_workflow() -> Iterator[tuple]:
             SESSION.active_agent, SESSION.done_agents,
             SESSION.event_log, SESSION.last_checkpoint,
         ),
-        render_live_panel_preview(SESSION.panel_images_preview),
+        render_live_panel_preview(SESSION.panel_images_preview, SESSION.character_preview),
         render_project_info(SESSION.state),
         gr.update(interactive=False),
         gr.update(interactive=False),
@@ -352,7 +369,7 @@ def start_workflow() -> Iterator[tuple]:
                 SESSION.active_agent, SESSION.done_agents,
                 SESSION.event_log, SESSION.last_checkpoint,
             ),
-            render_live_panel_preview(SESSION.panel_images_preview),
+            render_live_panel_preview(SESSION.panel_images_preview, SESSION.character_preview),
             render_project_info(SESSION.state),
             gr.update(interactive=at_checkpoint),
             gr.update(interactive=at_checkpoint),
@@ -373,7 +390,7 @@ def respond_checkpoint(decision: str) -> Iterator[tuple]:
                 SESSION.active_agent, SESSION.done_agents,
                 SESSION.event_log, SESSION.last_checkpoint,
             ),
-            render_live_panel_preview(SESSION.panel_images_preview),
+            render_live_panel_preview(SESSION.panel_images_preview, SESSION.character_preview),
             render_project_info(SESSION.state),
             gr.update(interactive=False),
             gr.update(interactive=False),
@@ -396,7 +413,7 @@ def respond_checkpoint(decision: str) -> Iterator[tuple]:
             SESSION.active_agent, SESSION.done_agents,
             SESSION.event_log, SESSION.last_checkpoint,
         ),
-        render_live_panel_preview(SESSION.panel_images_preview),
+        render_live_panel_preview(SESSION.panel_images_preview, SESSION.character_preview),
         render_project_info(SESSION.state),
         gr.update(interactive=False),
         gr.update(interactive=False),
@@ -419,7 +436,7 @@ def respond_checkpoint(decision: str) -> Iterator[tuple]:
                 SESSION.active_agent, SESSION.done_agents,
                 SESSION.event_log, SESSION.last_checkpoint,
             ),
-            render_live_panel_preview(SESSION.panel_images_preview),
+            render_live_panel_preview(SESSION.panel_images_preview, SESSION.character_preview),
             render_project_info(SESSION.state),
             gr.update(interactive=at_checkpoint),
             gr.update(interactive=at_checkpoint),
@@ -789,7 +806,7 @@ def build_ui() -> gr.Blocks:
                             )
                     with gr.Column(scale=1):
                         panel_preview_html = gr.HTML(
-                            render_live_panel_preview([])
+                            render_live_panel_preview([], [])
                         )
 
                 # 调试面板（折叠）

@@ -5,7 +5,21 @@ import html
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any
+
+
+def _gradio_img_src(file_path: str) -> str:
+    """将绝对/相对文件路径转为 Gradio 可用的 img src URL。
+
+    Gradio 6.x 的 /gradio_api/file= 需要相对于工作目录的路径。
+    """
+    try:
+        rel = os.path.relpath(str(file_path), os.getcwd())
+    except (ValueError, OSError):
+        rel = str(file_path)
+    return rel.replace("\\", "/")
+
 
 _PHASE_AGENTS = [
     ("script_agent", "📝 剧本"),
@@ -562,7 +576,7 @@ def render_character_profiles(character_db: dict | None,
         img_path = ref.get("image_path", "")
         img_html = ""
         if img_path and os.path.exists(str(img_path)):
-            safe_path = str(img_path).replace("\\", "/")
+            safe_path = _gradio_img_src(str(img_path))
             img_html = (
                 f'<div style="text-align:center;margin:8px 0;">'
                 f'<img src="/gradio_api/file={html.escape(safe_path)}" '
@@ -614,7 +628,7 @@ def render_panel_images_gallery(panel_images: list[dict]) -> str:
 
         img_html = ""
         if path and os.path.exists(str(path)):
-            safe_path = str(path).replace("\\", "/")
+            safe_path = _gradio_img_src(str(path))
             img_html = (
                 f'<img src="/gradio_api/file={html.escape(safe_path)}" '
                 f'style="width:100%;height:180px;object-fit:cover;border-radius:6px;" '
@@ -678,48 +692,87 @@ def render_project_info(state: dict | None = None) -> str:
     """
 
 
-def render_live_panel_preview(panel_images: list[dict]) -> str:
-    """渲染实时面板图像预览（创作流程 Tab 中使用，简洁缩略图网格）。"""
-    if not panel_images:
-        return '<div style="color:#64748b;padding:8px;font-size:12px;">⏳ 等待面板图像生成...</div>'
+def render_live_panel_preview(
+    panel_images: list[dict],
+    character_images: list[dict] | None = None,
+) -> str:
+    """渲染实时预览区：角色人设图 + 面板图像。"""
+    if character_images is None:
+        character_images = []
 
-    items = []
-    for pi in panel_images:
-        pid = pi.get("panel_id", "?") if isinstance(pi, dict) else getattr(pi, "panel_id", "?")
-        path = pi.get("image_path", "") if isinstance(pi, dict) else getattr(pi, "image_path", "")
+    has_chars = bool(character_images)
+    has_panels = bool(panel_images)
 
-        img_html = ""
-        if path and os.path.exists(str(path)):
-            safe_path = str(path).replace("\\", "/")
-            img_html = (
-                f'<img src="/gradio_api/file={html.escape(safe_path)}" '
-                f'style="width:100%;height:120px;object-fit:cover;border-radius:4px;" '
-                f'alt="{html.escape(str(pid))}" loading="lazy"/>'
-            )
-        else:
-            img_html = (
-                f'<div style="width:100%;height:120px;background:#f1f5f9;border-radius:4px;'
-                f'display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px;">'
-                f'无图像</div>'
-            )
+    if not has_chars and not has_panels:
+        return '<div style="color:#64748b;padding:8px;font-size:12px;">⏳ 等待图像生成...</div>'
 
-        items.append(f"""
-        <div style="display:inline-block;width:140px;margin:4px;vertical-align:top;
-                    background:white;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">
-            {img_html}
-            <div style="padding:4px 6px;">
-                <div style="font-size:11px;font-weight:600;color:#1e293b;"
-                     title="{html.escape(str(pid))}">{html.escape(str(pid))}</div>
+    parts: list[str] = []
+
+    # 角色人设图
+    if has_chars:
+        char_items = []
+        for ci in character_images:
+            name = ci.get("name", ci.get("char_id", "?"))
+            path = ci.get("image_path", "")
+            img_html = _preview_thumbnail(path, str(name))
+            char_items.append(f"""
+            <div style="display:inline-block;width:140px;margin:4px;vertical-align:top;
+                        background:white;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">
+                {img_html}
+                <div style="padding:4px 6px;">
+                    <div style="font-size:11px;font-weight:600;color:#1e293b;">👤 {html.escape(str(name))}</div>
+                </div>
             </div>
-        </div>
-        """)
+            """)
+        parts.append(
+            f'<div style="margin-bottom:6px;font-size:11px;color:#64748b;">'
+            f'👤 角色人设 ({len(character_images)})</div>'
+            f'<div style="white-space:nowrap;overflow-x:auto;padding:4px;">{"".join(char_items)}</div>'
+        )
+
+    # 面板图像
+    if has_panels:
+        panel_items = []
+        for pi in panel_images:
+            pid = pi.get("panel_id", "?") if isinstance(pi, dict) else getattr(pi, "panel_id", "?")
+            path = pi.get("image_path", "") if isinstance(pi, dict) else getattr(pi, "image_path", "")
+            img_html = _preview_thumbnail(str(path), str(pid))
+            panel_items.append(f"""
+            <div style="display:inline-block;width:140px;margin:4px;vertical-align:top;
+                        background:white;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">
+                {img_html}
+                <div style="padding:4px 6px;">
+                    <div style="font-size:11px;font-weight:600;color:#1e293b;">🎨 {html.escape(str(pid))}</div>
+                </div>
+            </div>
+            """)
+        parts.append(
+            f'<div style="margin-bottom:6px;font-size:11px;color:#64748b;">'
+            f'🎨 面板图像 ({len(panel_images)})</div>'
+            f'<div style="white-space:nowrap;overflow-x:auto;padding:4px;">{"".join(panel_items)}</div>'
+        )
 
     return f"""
     <div class="cw-live-preview">
-        <div style="white-space:nowrap;overflow-x:auto;padding:4px;">{''.join(items)}</div>
-        <div style="font-size:11px;color:#94a3b8;padding:4px 8px;">共 {len(panel_images)} 个面板</div>
+        {"".join(parts)}
     </div>
     """
+
+
+def _preview_thumbnail(path: str, alt: str) -> str:
+    """单个预览缩略图（120px 高，cover 裁剪）。"""
+    if path and os.path.exists(str(path)):
+        safe_path = _gradio_img_src(str(path))
+        return (
+            f'<img src="/gradio_api/file={html.escape(safe_path)}" '
+            f'style="width:100%;height:120px;object-fit:cover;border-radius:4px;" '
+            f'alt="{html.escape(alt)}" loading="lazy"/>'
+        )
+    return (
+        f'<div style="width:100%;height:120px;background:#f1f5f9;border-radius:4px;'
+        f'display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px;">'
+        f'无图像</div>'
+    )
 
 
 def render_storyboard_detail(plan: list[dict]) -> str:
@@ -958,7 +1011,7 @@ def render_page_reader(
     # 主图像
     img_html = ""
     if image_path and os.path.exists(str(image_path)):
-        safe_path = str(image_path).replace("\\", "/")
+        safe_path = _gradio_img_src(str(image_path))
         img_html = (
             f'<a href="/gradio_api/file={html.escape(safe_path)}" target="_blank">'
             f'<img src="/gradio_api/file={html.escape(safe_path)}" '
@@ -1069,7 +1122,7 @@ def render_comparison_view(plan: list[dict], final_pages: list[dict]) -> str:
         if matched:
             path = matched.get("image_path", "") if isinstance(matched, dict) else getattr(matched, "image_path", "")
             if path and os.path.exists(str(path)):
-                safe_path = str(path).replace("\\", "/")
+                safe_path = _gradio_img_src(str(path))
                 final_img = (
                     f'<img src="/gradio_api/file={html.escape(safe_path)}" '
                     f'style="max-width:100%;max-height:400px;border-radius:6px;'
