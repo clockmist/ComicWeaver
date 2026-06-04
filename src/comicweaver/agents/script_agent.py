@@ -101,10 +101,12 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
             '      "atmosphere": "Mood (e.g., tense, peaceful)",\n'
             '      "characters_present": ["char_000"],\n'
             '      "actions": [{"actor": "char_000", "description": "Action description"}],\n'
-            '      "dialogues": [{"speaker": "char_000", "text": "Dialogue", "tone": "neutral"}],\n'
+            '      "dialogues": [{"speaker": "char_000", "text": "Dialogue", "tone": "angry"}],\n'
             '      "narration": null,\n'
             '      "emotion_intensity": 0.5,\n'
-            '      "panel_hint": 2\n'
+            '      "panel_hint": 2,\n'
+            '      "visual_hook": "The most visually striking moment in this scene",\n'
+            '      "shot_sequence_hint": "Suggested camera sequence (e.g., wide establishing -> medium close-up -> reaction close-up)"\n'
             '    }\n'
             '  ],\n'
             '  "emotion_curve": [0.3, 0.5, 0.8, 0.4],\n'
@@ -124,7 +126,13 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
             "7. narrative_structure: arrays contain scene INDICES (order field values).\n"
             "8. Each scene: at least 1 action + 1 dialogue.\n"
             "9. Title must be creative, never 'Untitled'.\n"
-            "10. Output ONLY the JSON object, no markdown, no extra text.\n\n"
+            "10. dialogue tone must be specific: angry, sad, joyful, fearful, determined, sarcastic, "
+            "whispering, desperate, calm, nervous, cold, warm — NEVER just 'neutral' unless truly neutral.\n"
+            "11. visual_hook: describe the SINGLE most visually compelling moment/image in this scene. "
+            "Think like a cinematographer: what shot would be the poster image for this scene?\n"
+            "12. shot_sequence_hint: suggest how camera shots should flow across panels within this scene "
+            "(e.g., 'establishing wide -> two-shot -> close-up reaction -> detail insert').\n"
+            "13. Output ONLY the JSON object, no markdown, no extra text.\n\n"
 
             "=== REMINDER: characters_present ===\n"
             "I repeat Rule #1 because it is the most common cause of rejection:\n"
@@ -133,12 +141,37 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
         )
 
         target_pages = inputs.target_pages
-        # 根据页数推断场景数：每页约 2-4 个面板 → 2-4 个场景，最少 4 个场景
         target_scenes = max(4, target_pages * 2)
 
+        # v0.4: Use story context if available, otherwise fallback to raw_text
+        story = inputs.story
+        if story:
+            story_context = (
+                f"=== DEVELOPED STORY ===\n"
+                f"Title: {story.title}\n"
+                f"Premise: {story.premise}\n"
+                f"Theme: {story.theme}\n"
+                f"Genre: {', '.join(story.genre)}\n"
+                f"Summary: {story.summary}\n"
+                f"Core Conflict: {story.core_conflict}\n"
+                f"Act Structure: {story.act_structure}\n"
+                f"Emotional Throughline: {story.emotional_throughline}\n"
+                f"Character Arcs: {story.character_arcs}\n"
+                f"\n=== YOUR TASK ===\n"
+                f"Adapt the above story into a comic script. The story gives you the full "
+                f"narrative arc — now translate it into visual comic language. "
+                f"Choose the most visually powerful moments for each scene. "
+                f"Design dialogue that reveals character and advances the plot. "
+                f"Think about what the READER SEES in each panel.\n"
+            )
+        else:
+            story_context = (
+                f'Create a comic script based on this story idea:\n\n'
+                f'"{inputs.raw_text}"\n\n'
+            )
+
         user_message = (
-            f"Create a comic script based on this story idea:\n\n"
-            f'"{inputs.raw_text}"\n\n'
+            f"{story_context}"
             f"Parameters:\n"
             f"- Target pages: {target_pages}\n"
             f"- Target scenes: {target_scenes}\n"
@@ -209,8 +242,11 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
         })
 
     async def _run_local(self, inputs: ScriptInput, context: AgentContext) -> ScriptOutput:
-        """根据用户输入构造一个可信的虚假剧本。"""
+        """根据用户输入（或已开发的故事）构造一个可信的虚假剧本。"""
         await self._sleep_for_demo(0.3)
+
+        story = inputs.story
+        raw_text = inputs.raw_text
 
         # 选取角色数量(2-3)
         n_chars = 2 if inputs.creation_mode == CreationMode.SIMPLE else 3
@@ -233,23 +269,35 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
         for i in range(n_scenes):
             # 每个场景仅 1 个角色（黑白漫画单角色分镜系统）
             present = [characters[i % len(characters)].char_id]
+
+            # v0.4: 生成 visual_hook 和 shot_sequence_hint
+            location = _MOCK_LOCATIONS[i % len(_MOCK_LOCATIONS)]
+            atmosphere = _MOCK_ATMOSPHERES[i % len(_MOCK_ATMOSPHERES)]
+            hook = _make_visual_hook(location, atmosphere, present[0])
+            shot_hint = _make_shot_sequence_hint(i, n_scenes)
+
+            # v0.4: 为 dialogue 生成有意义的 tone
+            tone = _tone_for_position(i, n_scenes)
+
             scenes.append(
                 Scene(
                     scene_id=f"scene_{i:03d}",
                     order=i,
-                    location=_MOCK_LOCATIONS[i % len(_MOCK_LOCATIONS)],
+                    location=location,
                     time_of_day="夜晚" if i % 2 == 0 else "白天",
-                    atmosphere=_MOCK_ATMOSPHERES[i % len(_MOCK_ATMOSPHERES)],
+                    atmosphere=atmosphere,
                     characters_present=present,
                     dialogues=[
                         Dialogue(
                             speaker=present[0],
                             text=f"这是第{i + 1}场的开场对话。",
-                            tone="neutral",
+                            tone=tone,
                         ),
                     ],
                     emotion_intensity=_emotion_for_position(i, n_scenes),
                     panel_hint=2 if i in (n_scenes // 2, n_scenes - 1) else 1,
+                    visual_hook=hook,
+                    shot_sequence_hint=shot_hint,
                 )
             )
 
@@ -265,11 +313,15 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
             pacing="varied",
         )
 
-        title = _make_title(inputs.raw_text)
+        title = _make_title(raw_text)
+        if story:
+            summary = story.summary or f"基于「{raw_text[:30]}」改编的{n_scenes}场漫画故事。"
+        else:
+            summary = f"基于「{raw_text[:30]}」改编的{n_scenes}场漫画故事。"
 
         return ScriptOutput(
             title=title,
-            summary=f"基于「{inputs.raw_text[:30]}」改编的{n_scenes}场漫画故事。",
+            summary=summary,
             genre=["剧情", inputs.style_hint or "原创"],
             characters=characters,
             scenes=scenes,
@@ -334,3 +386,40 @@ def _emotion_for_position(i: int, total: int) -> float:
     if progress < 0.75:
         return 0.7 + (progress - 0.5) * 1.2  # 高潮
     return 0.4 + random.uniform(-0.1, 0.1)
+
+
+def _make_visual_hook(location: str, atmosphere: str, char_id: str) -> str:
+    """为本地 mock 场景生成视觉焦点描述。"""
+    hooks = [
+        f"角色{char_id}站在{location}的中央，{atmosphere}的氛围笼罩四周",
+        f"特写镜头：角色{char_id}的面部表情展现出{atmosphere}的情绪",
+        f"角色{char_id}在{location}中的剪影，背景是{atmosphere}的光影",
+        f"动态镜头：角色{char_id}的关键动作瞬间定格",
+    ]
+    return random.choice(hooks)
+
+
+def _make_shot_sequence_hint(i: int, total: int) -> str:
+    """为本地 mock 场景生成镜头序列建议。"""
+    progress = i / max(total - 1, 1)
+    if progress < 0.25:
+        return "远景建立 → 中景介绍角色"
+    elif progress < 0.5:
+        return "中景动作 → 特写情感反应"
+    elif progress < 0.75:
+        return "中景紧张对峙 → 特写关键细节 → 极端特写表情"
+    else:
+        return "中景 → 远景收尾"
+
+
+def _tone_for_position(i: int, total: int) -> str:
+    """根据叙事位置生成对话情感语气。"""
+    progress = i / max(total - 1, 1)
+    if progress < 0.25:
+        return random.choice(["calm", "curious", "determined"])
+    elif progress < 0.5:
+        return random.choice(["tense", "worried", "urgent"])
+    elif progress < 0.75:
+        return random.choice(["desperate", "angry", "fearful"])
+    else:
+        return random.choice(["relieved", "sorrowful", "calm"])

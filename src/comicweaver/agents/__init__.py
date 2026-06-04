@@ -4,6 +4,7 @@ from .image_agent import ImageAgent
 from .layout_agent import LayoutAgent
 from .reviewer_agent import ReviewerAgent
 from .script_agent import ScriptAgent
+from .story_agent import StoryAgent
 from .storyboard_agent import StoryboardAgent
 
 __all__ = [
@@ -12,12 +13,14 @@ __all__ = [
     "LayoutAgent",
     "ReviewerAgent",
     "ScriptAgent",
+    "StoryAgent",
     "StoryboardAgent",
 ]
 
 
 # Agent 注册表 - 用于编排层动态查找
 AGENT_REGISTRY: dict[str, type] = {
+    "story_agent": StoryAgent,
     "script_agent": ScriptAgent,
     "character_agent": CharacterAgent,
     "storyboard_agent": StoryboardAgent,

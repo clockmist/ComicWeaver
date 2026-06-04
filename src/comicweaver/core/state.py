@@ -22,6 +22,10 @@ class ComicState(TypedDict, total=False):
     interaction_mode: str
     target_pages: int
 
+    # v0.4: 故事开发
+    developed_story: dict
+    narrative_structure: dict
+
     # 剧本理解
     structured_script: dict
     emotion_curve: list[float]
@@ -72,6 +76,8 @@ def make_initial_state(
         style_preset=style_preset,
         interaction_mode=interaction_mode,
         target_pages=target_pages,
+        developed_story={},
+        narrative_structure={},
         structured_script={},
         emotion_curve=[],
         character_db={},

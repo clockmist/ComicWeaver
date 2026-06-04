@@ -52,8 +52,13 @@ class CharacterAgent(BaseAgent[CharacterInput, CharacterOutput]):
         profiles: dict[str, CharacterProfile] = {}
 
         # 批量调用 LLM 生成所有角色的 Tag / 性别 / 外观描述（一次 API 调用）
-        # 不再使用硬编码的 _detect_gender / _extract_traits_from_appearance
-        llm_data_map = await self._generate_core_tags_batch(drafts)
+        try:
+            llm_data_map = await self._generate_core_tags_batch(drafts)
+        except ApiBackendError:
+            if self.config.runtime.fallback_to_local:
+                llm_data_map = self._generate_core_tags_local(drafts)
+            else:
+                raise
 
         for draft in drafts:
             # 随机种子：首次生成角色人设图时使用随机种子，
@@ -65,6 +70,16 @@ class CharacterAgent(BaseAgent[CharacterInput, CharacterOutput]):
             core_tags = llm_data.get("core_tags", draft.appearance)
             gender_tag = llm_data.get("gender_tag", "1girl")
             appearance_prompt = llm_data.get("appearance_prompt", draft.appearance)
+
+            # v0.4: 从 LLM 响应中提取结构化的 VisualTraits
+            vt_raw = llm_data.get("visual_traits", {})
+            vt = VisualTraits(
+                hair=str(vt_raw.get("hair", "")),
+                eyes=str(vt_raw.get("eyes", "")),
+                body=str(vt_raw.get("body", "")),
+                clothing=str(vt_raw.get("clothing", "")),
+                distinctive=list(vt_raw.get("distinctive", [])) if isinstance(vt_raw.get("distinctive"), list) else [],
+            )
 
             ref_path = await self._reference_image_path(
                 draft, context, inputs.style_preset, seed, core_tags, gender_tag,
@@ -79,7 +94,7 @@ class CharacterAgent(BaseAgent[CharacterInput, CharacterOutput]):
                     generation_prompt=f"character design sheet: {core_tags}",
                     confidence=0.85,
                 ),
-                visual_traits=VisualTraits(),
+                visual_traits=vt,
                 clip_embedding_id=f"emb_{draft.char_id}",
                 style_preset=inputs.style_preset or context.style_preset,
                 seed=seed,
@@ -164,6 +179,10 @@ class CharacterAgent(BaseAgent[CharacterInput, CharacterOutput]):
                 f"ComfyUI returned empty image_path for char_id={draft.char_id}"
             )
 
+        # Local/dev fallback: return placeholder path when image API unavailable
+        if self.config.runtime.fallback_to_local:
+            return f"projects/{context.project_id}/characters/{draft.char_id}/placeholder.png"
+
         raise ApiBackendError(
             "Image API is not available — cannot generate character reference"
         )
@@ -189,15 +208,21 @@ CRITICAL RULES:
    - build: body type (slim/muscular/petite/tall/short/athletic/lean/broad)
    - accessories: eyewear, jewelry, weapons, scarves, hats (describe by SHAPE and type, not color)
 3. appearance_prompt: A short natural-language visual description focusing on hair style/length, eye shape, clothing style/fit/texture, build. Used as fallback. Keep under 80 words. Describe TEXTURE and SHAPE, not color.
-4. STRICTLY FORBIDDEN (will degrade black and white manga quality):
+4. visual_traits: A structured breakdown of the character's appearance with these EXACT fields:
+   - hair: brief description of hair style, length, texture (e.g. "short spiky", "long wavy")
+   - eyes: brief description of eye shape and specific color (e.g. "narrow sharp grey", "large round blue") — MUST include a specific eye color
+   - body: brief description of build and height (e.g. "slim athletic tall", "petite slender")
+   - clothing: brief description of clothing style, fit, layers, textures (e.g. "loose hoodie, layered collar, slim-fit pants")
+   - distinctive: list of 0-3 unique visual features (e.g. ["scar on left cheek", "always wears pendant"])
+5. STRICTLY FORBIDDEN (will degrade black and white manga quality):
    - NO clothing color tags (no "red dress", "blue jacket", "golden necklace", etc.)
    - NO skin color tags (no "dark skin", "pale skin", "brown skin", "black skin", "blue skin", etc.)
    - NO hair colors except black/grey/white/silver
    - NO colored accessory descriptions
-5. NEVER include style tags (anime, realistic, masterpiece, quality, detailed, beautiful, etc.)
-6. NEVER include background tags (simple background, white background, etc.)
-7. Always include "solo" in core_tags (this is for single-character reference images).
-8. Output valid JSON: {"characters": [{"char_id": "...", "core_tags": "1girl, solo, ...", "gender_tag": "1girl", "appearance_prompt": "..."}]}"""
+6. NEVER include style tags (anime, realistic, masterpiece, quality, detailed, beautiful, etc.)
+7. NEVER include background tags (simple background, white background, etc.)
+8. Always include "solo" in core_tags (this is for single-character reference images).
+9. Output valid JSON: {"characters": [{"char_id": "...", "core_tags": "1girl, solo, ...", "gender_tag": "1girl", "appearance_prompt": "...", "visual_traits": {"hair": "...", "eyes": "...", "body": "...", "clothing": "...", "distinctive": [...]}}]}"""
 
         char_list = [
             {
@@ -248,6 +273,35 @@ CRITICAL RULES:
                     f"LLM did not return core_tags for char_id={d.char_id}"
                 )
 
+        return result
+
+    def _generate_core_tags_local(
+        self, drafts: list[CharacterDraft]
+    ) -> dict[str, dict]:
+        """Local fallback: generate mock core_tags and visual_traits (v0.4)."""
+        result: dict[str, dict] = {}
+        for d in drafts:
+            # Simple gender detection from appearance text
+            appearance_lower = d.appearance.lower()
+            if "female" in appearance_lower or "女" in d.appearance or "girl" in appearance_lower:
+                gender_tag = "1girl"
+            elif "male" in appearance_lower or "男" in d.appearance or "boy" in appearance_lower:
+                gender_tag = "1boy"
+            else:
+                gender_tag = "1girl"
+
+            result[d.char_id] = {
+                "core_tags": f"{gender_tag}, solo, young_adult, short hair, black hair, round eyes, casual clothes, slim",
+                "gender_tag": gender_tag,
+                "appearance_prompt": d.appearance,
+                "visual_traits": {
+                    "hair": "short straight hair",
+                    "eyes": "round dark eyes",
+                    "body": "slim build",
+                    "clothing": "casual clothes",
+                    "distinctive": [],
+                },
+            }
         return result
 
     async def _build_window(

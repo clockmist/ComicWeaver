@@ -20,6 +20,7 @@ from comicweaver.agents import (
     ImageAgent,
     LayoutAgent,
     ScriptAgent,
+    StoryAgent,
     StoryboardAgent,
 )
 from comicweaver.api import ApiBackendError
@@ -34,10 +35,13 @@ from comicweaver.core import (
     ImageInput,
     InteractionMode,
     LayoutInput,
+    NarrativeStructure,
     PageLayout,
     PanelImage,
     Scene,
     ScriptInput,
+    StoryInput,
+    StoryOutput,
     StoryboardInput,
     StreamEventType,
 )
@@ -86,6 +90,7 @@ class ComicWorkflow:
 
     def __init__(self, resume_phase: str | None = None) -> None:
         self.config = load_config()
+        self.story_agent = StoryAgent()
         self.script_agent = ScriptAgent()
         self.character_agent = CharacterAgent()
         self.storyboard_agent = StoryboardAgent()
@@ -123,14 +128,16 @@ class ComicWorkflow:
     def _build_graph(self) -> StateGraph:
         builder = StateGraph(ComicState)
 
-        # -- 5 个生产节点，线性串联 --
+        # -- 6 个生产节点，线性串联 (v0.4: +story) --
+        builder.add_node("story", self._node_story)
         builder.add_node("script", self._node_script)
         builder.add_node("character", self._node_character)
         builder.add_node("storyboard", self._node_storyboard)
         builder.add_node("image", self._node_image)
         builder.add_node("layout", self._node_layout)
 
-        # -- 边：script → character → storyboard → image → layout → END --
+        # -- 边：story → script → character → storyboard → image → layout → END --
+        builder.add_edge("story", "script")
         builder.add_edge("script", "character")
         builder.add_edge("character", "storyboard")
         builder.add_edge("storyboard", "image")
@@ -139,14 +146,15 @@ class ComicWorkflow:
 
         # -- 入口：根据 resume_phase 决定从哪个节点开始 --
         phase_to_node: dict[str, str] = {
-            "init": "script",
+            "init": "story",
+            "story": "script",
             "script": "character",
             "character": "storyboard",
             "storyboard": "image",
             "image": "layout",
             "layout": "layout",
         }
-        start_node = "script"
+        start_node = "story"
         if self._resume_phase and self._resume_phase in phase_to_node:
             start_node = phase_to_node[self._resume_phase]
         builder.add_edge(START, start_node)
@@ -157,6 +165,48 @@ class ComicWorkflow:
     # 生产节点实现
     # ------------------------------------------------------------------
 
+    async def _node_story(self, state: ComicState) -> ComicState:
+        """v0.4: StoryAgent — expand raw user input into a complete story outline."""
+        t0 = time.perf_counter()
+        writer = get_stream_writer()
+        writer(WorkflowMessage(WorkflowEvent.NODE_START, "story_agent"))
+        writer(log_workflow_event("进入阶段", "story"))
+
+        state["current_phase"] = "story"
+        ctx = self._make_context(state)
+        inputs = StoryInput(
+            raw_text=state.get("user_input", ""),
+            creation_mode=CreationMode(state.get("creation_mode", "simple")),
+            target_pages=state.get("target_pages", 4),
+            style_hint=state.get("style_preset", "manga"),
+        )
+
+        writer(log_agent_input("story_agent", {
+            "raw_text": inputs.raw_text[:200],
+            "target_pages": inputs.target_pages,
+        }))
+
+        try:
+            async for evt in self.story_agent.astream(inputs, ctx):
+                writer(evt)
+                if evt.type == StreamEventType.DONE and evt.content:
+                    state["developed_story"] = evt.content
+                    writer(log_agent_output("story_agent", {
+                        "title": evt.content.get("title", ""),
+                        "genre": evt.content.get("genre", []),
+                        "character_arcs_count": len(evt.content.get("character_arcs", [])),
+                    }))
+        except Exception as exc:
+            writer(log_agent_error("story_agent", f"执行失败: {exc}",
+                {"raw_text": inputs.raw_text[:100], "error_type": type(exc).__name__}))
+            raise
+
+        self._save_checkpoint(state)
+        elapsed = (time.perf_counter() - t0) * 1000
+        writer(log_performance("story_agent", elapsed))
+        writer(WorkflowMessage(WorkflowEvent.NODE_END, "story_agent"))
+        return state
+
     async def _node_script(self, state: ComicState) -> ComicState:
         t0 = time.perf_counter()
         writer = get_stream_writer()
@@ -165,9 +215,15 @@ class ComicWorkflow:
 
         state["current_phase"] = "script"
         ctx = self._make_context(state)
+
+        # v0.4: Build story from state if available
+        story_dict = state.get("developed_story") or {}
+        story = StoryOutput.model_validate(story_dict) if story_dict else None
+
         inputs = ScriptInput(
             creation_mode=CreationMode(state.get("creation_mode", "simple")),
             raw_text=state.get("user_input", ""),
+            story=story,
             target_pages=state.get("target_pages", 4),
             style_hint=state.get("style_preset", "manga"),
         )
@@ -176,6 +232,7 @@ class ComicWorkflow:
         writer(log_agent_input("script_agent", {
             "creation_mode": inputs.creation_mode.value,
             "raw_text": inputs.raw_text[:200],
+            "has_story": story is not None,
             "target_pages": inputs.target_pages,
             "style_hint": inputs.style_hint or "none",
         }))
@@ -188,6 +245,10 @@ class ComicWorkflow:
                     if evt.type == StreamEventType.DONE and evt.content:
                         state["structured_script"] = evt.content
                         state["emotion_curve"] = evt.content.get("emotion_curve", [])
+                        # v0.4: Extract NarrativeStructure from script output
+                        ns = evt.content.get("narrative_structure")
+                        if ns:
+                            state["narrative_structure"] = ns
                         writer(log_agent_output("script_agent",
                             summarize_script_output(evt.content)))
             except Exception as exc:
@@ -312,12 +373,20 @@ class ComicWorkflow:
         cdb_dict = state.get("character_db") or {}
         cdb = CharacterDB.model_validate(cdb_dict) if cdb_dict else None
 
+        # v0.4: Build story summary and narrative structure from state
+        story_dict = state.get("developed_story") or {}
+        story_summary = story_dict.get("summary", "") if story_dict else ""
+        ns_dict = state.get("narrative_structure") or {}
+        narrative_structure = NarrativeStructure.model_validate(ns_dict) if ns_dict else None
+
         inputs = StoryboardInput(
             scenes=scenes,
             emotion_curve=state.get("emotion_curve", []),
             character_db=cdb,
             style_preset=state.get("style_preset", "manga"),
             target_pages=state.get("target_pages", 4),
+            story_summary=story_summary,
+            narrative_structure=narrative_structure,
         )
 
         # 开发者日志：Agent 输入
@@ -404,9 +473,12 @@ class ComicWorkflow:
         for page in pages:
             for panel in page.panels:
                 panel_idx += 1
+                # v0.4: Build reference_windows from character_db
+                ref_windows = self._build_ref_windows(panel, character_db)
                 # 传入 character_db 以启用固定种子 + 角色外观 prompt
                 inputs = ImageInput(
                     panel_plan=panel,
+                    reference_windows=ref_windows,
                     character_db=character_db,
                     style_preset="black and white manga",
                 )
@@ -652,6 +724,32 @@ class ComicWorkflow:
     # ------------------------------------------------------------------
     # 辅助方法
     # ------------------------------------------------------------------
+
+    def _build_ref_windows(
+        self, panel, character_db: CharacterDB | None
+    ) -> dict:
+        """v0.4: Build reference windows for a panel from character_db."""
+        from comicweaver.core import ReferenceWindow, WeightedReference
+        if not character_db:
+            return {}
+        windows: dict[str, ReferenceWindow] = {}
+        for char_id in panel.characters_in_panel:
+            if char_id in character_db.characters:
+                cp = character_db.characters[char_id]
+                ref_path = cp.base_reference.image_path
+                windows[char_id] = ReferenceWindow(
+                    panel_id=panel.panel_id,
+                    char_id=char_id,
+                    references=[
+                        WeightedReference(
+                            image_path=ref_path,
+                            weight=1.0,
+                            role="base",
+                        )
+                    ],
+                    window_strategy="base_only",
+                )
+        return windows
 
     def _make_context(self, state: ComicState) -> AgentContext:
         return AgentContext(

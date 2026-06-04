@@ -153,6 +153,9 @@ class Scene(BaseModel):
     narration: str | None = None
     emotion_intensity: float = 0.5
     panel_hint: int = 1
+    # v0.4: 视觉化提示 — 帮助下游 Agent 理解该场景的视觉重点
+    visual_hook: str = ""           # 该场景最具视觉冲击力的瞬间描述
+    shot_sequence_hint: str = ""    # 建议的镜头序列 (如 "远景建立 → 中景对话 → 特写反应")
 
 
 class NarrativeStructure(BaseModel):
@@ -163,9 +166,43 @@ class NarrativeStructure(BaseModel):
     pacing: Literal["slow", "medium", "fast", "varied"] = "medium"
 
 
+# ===========================================================================
+# 故事开发 Agent 模型 (v0.4)
+# ===========================================================================
+
+class StoryOutput(BaseModel):
+    """StoryAgent 输出：完整的故事开发结果。"""
+    title: str = ""
+    premise: str = ""               # 1-2 句高概念
+    theme: str = ""                 # 中心主题
+    genre: list[str] = Field(default_factory=list)
+    summary: str = ""               # 完整故事摘要 (3-5 段)
+    core_conflict: str = ""         # 核心冲突
+    act_structure: str = ""         # 三幕/起承转合结构描述
+    character_arcs: list[dict] = Field(default_factory=list)
+    # [{char_id, name, arc_description, starting_state, ending_state}]
+    emotional_throughline: str = "" # 读者情感旅程描述
+    target_pages: int = 4
+    meta: AgentOutputMeta = Field(default_factory=lambda: AgentOutputMeta(
+        agent="story_agent", version="0.1.0"
+    ))
+
+
+class StoryInput(BaseModel):
+    """StoryAgent 输入：用户的原始故事创意。"""
+    raw_text: str
+    creation_mode: CreationMode = CreationMode.SIMPLE
+    target_pages: int = 4
+    genre_hint: str | None = None
+    style_hint: str | None = None
+    language: str = "zh"
+    feedback: ReviewFeedback | None = None
+
+
 class ScriptInput(BaseModel):
     creation_mode: CreationMode = CreationMode.SIMPLE
-    raw_text: str
+    raw_text: str = ""                                          # 兼容旧路径
+    story: StoryOutput | None = None                            # v0.4: 从故事出发
     target_pages: int = 4
     target_panels_per_page: int = 4
     style_hint: str | None = None
@@ -298,6 +335,19 @@ class BubbleHint(BaseModel):
     avoid_zones: list[BoundingBox] = Field(default_factory=list)
 
 
+class PreviousPanelContext(BaseModel):
+    """前一面板的上下文，用于保持视觉连续性 (v0.4)。"""
+    panel_id: str = ""
+    shot_size: str = ""             # ShotSize value
+    camera_angle: str = ""          # CameraAngle value
+    characters_in_panel: list[str] = Field(default_factory=list)
+    pose_hint: str = ""             # 前一格的动作姿态
+    expression: str = ""            # 前一格的表情
+    setting_summary: str = ""       # 前一格的场景/背景
+    emotion: str = ""               # 前一格的情绪 (mood)
+    emotion_intensity: float = 0.5
+
+
 class PanelPlan(BaseModel):
     panel_id: str
     page_id: str
@@ -323,6 +373,8 @@ class PanelPlan(BaseModel):
     scene_lighting: str = ""     # 场景光照描述
     weather: str = ""            # 天气
     time_of_day: str = ""        # 时间段
+    # v0.4: 前格上下文 — 保持面板间视觉连续性
+    previous_panel_context: PreviousPanelContext | None = None
 
 
 class PageLayout(BaseModel):
@@ -343,6 +395,9 @@ class StoryboardInput(BaseModel):
     target_pages: int = 4
     target_panels_per_page: int = 4
     feedback: ReviewFeedback | None = None
+    # v0.4: 故事上下文 — 让 StoryboardAgent 知道叙事阶段
+    story_summary: str = ""                                     # 从 StoryOutput.summary
+    narrative_structure: NarrativeStructure | None = None       # 当前叙事阶段
 
 
 class StoryboardOutput(BaseModel):

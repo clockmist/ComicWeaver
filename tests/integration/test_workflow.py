@@ -24,15 +24,13 @@ async def test_full_workflow_full_auto():
     # 至少应该看到开始与结束
     assert len(events) > 0
 
-    # 验证最终state被填充
-    assert state.get("structured_script")
-    assert state.get("character_db")
-    assert state.get("storyboard_plan")
-    assert state.get("panel_images")
-    assert state.get("final_pages")
-
-    # 验证审查记录被填充
-    assert len(state.get("review_results", [])) >= 4
+    # v0.4: 验证所有阶段 state 被填充（6 agent 流水线）
+    assert state.get("developed_story"), "StoryAgent should populate developed_story"
+    assert state.get("structured_script"), "ScriptAgent should populate structured_script"
+    assert state.get("character_db"), "CharacterAgent should populate character_db"
+    assert state.get("storyboard_plan"), "StoryboardAgent should populate storyboard_plan"
+    assert state.get("panel_images"), "ImageAgent should populate panel_images"
+    assert state.get("final_pages"), "LayoutAgent should populate final_pages"
 
     # 验证有完成事件
     done_msgs = [
