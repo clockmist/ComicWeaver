@@ -107,13 +107,12 @@ class StoryAgent(BaseAgent[StoryInput, StoryOutput]):
     rubric_id = "rubric_script_v1"
 
     async def run(self, inputs: StoryInput, context: AgentContext) -> StoryOutput:
-        if self.config.llm.is_available:
-            try:
-                return await self._run_api(inputs, context)
-            except ApiBackendError:
-                if not self.config.runtime.fallback_to_local:
-                    raise
-        return await self._run_local(inputs, context)
+        if not self.config.llm.is_available:
+            raise ApiBackendError(
+                "LLM API is not configured — StoryAgent requires a working LLM "
+                "to generate narrative stories. Please configure llm in configs/comicweaver.yaml."
+            )
+        return await self._run_api(inputs, context)
 
     async def _run_api(self, inputs: StoryInput, context: AgentContext) -> StoryOutput:
         from pydantic import ValidationError
@@ -142,9 +141,10 @@ class StoryAgent(BaseAgent[StoryInput, StoryOutput]):
                 {"user_message": user_message},
             )
         except ApiBackendError:
-            if not self.config.runtime.fallback_to_local:
-                raise
-            return await self._run_local(inputs, context)
+            raise ApiBackendError(
+                f"StoryAgent LLM call failed — cannot generate story. "
+                f"Check your LLM configuration (provider: {self.config.llm.provider})."
+            ) from None
 
         try:
             output = StoryOutput.model_validate(data)
@@ -153,13 +153,15 @@ class StoryAgent(BaseAgent[StoryInput, StoryOutput]):
                 try:
                     output = StoryOutput.model_validate(list(data.values())[0])
                 except ValidationError:
-                    if self.config.runtime.fallback_to_local:
-                        return await self._run_local(inputs, context)
-                    raise
-            elif self.config.runtime.fallback_to_local:
-                return await self._run_local(inputs, context)
+                    raise ApiBackendError(
+                        "StoryAgent received invalid JSON from LLM — "
+                        "the model did not return the expected story format."
+                    )
             else:
-                raise
+                raise ApiBackendError(
+                    "StoryAgent received invalid JSON from LLM — "
+                    "the model did not return the expected story format."
+                )
 
         # Quality check: ensure title is meaningful
         title = output.title
@@ -182,87 +184,6 @@ class StoryAgent(BaseAgent[StoryInput, StoryOutput]):
                 ],
             )
         })
-
-    async def _run_local(self, inputs: StoryInput, context: AgentContext) -> StoryOutput:
-        """Local fallback: generate a basic story from the raw idea."""
-        await self._sleep_for_demo(0.2)
-
-        raw = inputs.raw_text.strip()
-        title = _make_story_title(raw)
-        pages = inputs.target_pages
-
-        # Scale story detail with page count
-        if pages <= 2:
-            story_text = (
-                f"在一条寂静的街道上，{raw}。\n\n"
-                f"这个瞬间虽然短暂，却改变了故事的走向。"
-            )
-        elif pages <= 4:
-            story_text = (
-                f"故事从{raw}开始。\n\n"
-                f"主角面对着未知的挑战，内心充满矛盾。每一步都考验着意志，"
-                f"每一个选择都通向不同的命运。\n\n"
-                f"在关键时刻，主角做出了决定性的行动。这个选择带来了改变，"
-                f"也揭示了故事真正的主题——关于勇气、成长与自我发现。\n\n"
-                f"故事的结尾留下了回味的空间：世界已经不同，而主角也已不再是当初的那个人。"
-            )
-        elif pages <= 8:
-            story_text = (
-                f"在这个故事的开端，{raw}。\n\n"
-                f"起初看似平静的日常很快被打破，主角被卷入了一场超出预想的冒险。"
-                f"随着故事展开，新的角色陆续登场——有盟友，也有对手。"
-                f"每个人都带着自己的秘密和目标，让局势变得更加复杂。\n\n"
-                f"中段的转折让主角面临真正的考验。曾经相信的一切都被质疑，"
-                f"而前方的道路充满危险。但正是在最黑暗的时刻，主角发现了内在的力量。\n\n"
-                f"高潮来临，所有的线索汇聚到一起。一场决定性的对抗让故事达到顶峰。"
-                f"主角做出了关键的选择——不是为了胜利，而是为了守护重要的东西。\n\n"
-                f"故事的结尾既完整又意味深长。世界恢复了平静，但主角知道，"
-                f"这段旅程改变了一切。回望来路，每一步都是必要的。"
-            )
-        else:
-            story_text = (
-                f"这是一个关于{raw}的故事。\n\n"
-                f"开篇，世界被细致地描绘出来——{inputs.style_hint or '漫画'}风格下，"
-                f"每一个场景都充满了氛围。主角的日常生活被一个事件打破，"
-                f"这个契机开启了长达{pages}页的叙事旅程。\n\n"
-                f"第一幕建立了故事的基础：主角是谁，这个世界是什么样的，"
-                f"以及即将到来的冲突。配角的登场丰富了故事的层次，"
-                f"每个人都有自己想要守护的东西。\n\n"
-                f"第二幕将冲突逐步升级。主角遭遇挫折，发现真相并非表面那么简单。"
-                f"信任被考验，联盟被打破又重新建立。每一次失败都让主角更接近"
-                f"故事的核心——关于人性、关于选择、关于代价。\n\n"
-                f"第三幕将所有线索汇聚于高潮。在最终的对抗中，主角不仅要面对"
-                f"外在的敌人，更要面对内心最大的恐惧。结局不是简单的胜利或失败，"
-                f"而是一种转变——主角已经成长，世界也因此改变。\n\n"
-                f"尾声给读者留下思考：故事虽然结束，但它的影响仍在延续。"
-                f"那些选择、那些牺牲、那些不期而遇的温暖——共同构成了这个故事的意义。"
-            )
-
-        return StoryOutput(
-            title=title,
-            author_note=f"一个关于{raw[:60]}的故事",
-            tone="dramatic",
-            genre=[inputs.genre_hint or "drama"],
-            story_text=story_text,
-            characters=[
-                {"name": "主角", "role": "protagonist",
-                 "brief_description": raw[:80]},
-                {"name": "对手", "role": "antagonist",
-                 "brief_description": "代表对立力量的角色"},
-            ],
-            core_conflict="主角必须在外在挑战与内心挣扎之间找到平衡",
-            setting="一个充满可能性的世界",
-            target_pages=pages,
-            meta=AgentOutputMeta(
-                agent=self.name,
-                version=self.version,
-                inputs_hash=self._inputs_hash(inputs),
-                self_check_notes=[
-                    f"Local fallback — {len(story_text)} chars",
-                    "Configure LLM API for richer story generation",
-                ],
-            ),
-        )
 
     async def astream(
         self, inputs: StoryInput, context: AgentContext
