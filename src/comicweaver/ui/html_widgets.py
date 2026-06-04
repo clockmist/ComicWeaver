@@ -5,7 +5,21 @@ import html
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any
+
+
+def _gradio_img_src(file_path: str) -> str:
+    """将绝对/相对文件路径转为 Gradio 可用的 img src URL。
+
+    Gradio 6.x 的 /gradio_api/file= 需要相对于工作目录的路径。
+    """
+    try:
+        rel = os.path.relpath(str(file_path), os.getcwd())
+    except (ValueError, OSError):
+        rel = str(file_path)
+    return rel.replace("\\", "/")
+
 
 _PHASE_AGENTS = [
     ("script_agent", "📝 剧本"),
@@ -561,10 +575,11 @@ def render_character_profiles(character_db: dict | None,
         # 参考图
         img_path = ref.get("image_path", "")
         img_html = ""
-        if img_path and os.path.exists(img_path):
+        if img_path and os.path.exists(str(img_path)):
+            safe_path = _gradio_img_src(str(img_path))
             img_html = (
                 f'<div style="text-align:center;margin:8px 0;">'
-                f'<img src="/gradio_api/file={html.escape(img_path)}" '
+                f'<img src="/gradio_api/file={html.escape(safe_path)}" '
                 f'style="max-width:150px;max-height:200px;border:1px solid #e2e8f0;'
                 f'border-radius:8px;" alt="{name} 参考图"/>'
                 f'</div>'
@@ -612,9 +627,10 @@ def render_panel_images_gallery(panel_images: list[dict]) -> str:
         prompt = pi.get("prompt_used", "")[:80] or ""
 
         img_html = ""
-        if path and os.path.exists(path):
+        if path and os.path.exists(str(path)):
+            safe_path = _gradio_img_src(str(path))
             img_html = (
-                f'<img src="/gradio_api/file={html.escape(path)}" '
+                f'<img src="/gradio_api/file={html.escape(safe_path)}" '
                 f'style="width:100%;height:180px;object-fit:cover;border-radius:6px;" '
                 f'alt="{html.escape(pid)}" loading="lazy"/>'
             )
@@ -646,6 +662,117 @@ def render_panel_images_gallery(panel_images: list[dict]) -> str:
         <div style="white-space:nowrap;overflow-x:auto;padding:4px;">{''.join(items)}</div>
     </div>
     """
+
+
+def render_project_info(state: dict | None = None) -> str:
+    """渲染当前项目信息栏（创作流程 Tab 顶部）。"""
+    if not state:
+        return '<div style="color:#94a3b8;padding:8px;font-size:12px;">尚未创建项目</div>'
+
+    title = state.get("title", "") or "未命名"
+    pid = state.get("project_id", "?")
+    phase = state.get("current_phase", "init")
+    phase_labels = {
+        "init": "等待开始", "script": "剧本阶段", "character": "角色阶段",
+        "storyboard": "分镜阶段", "image": "图像阶段", "layout": "排版阶段",
+    }
+    phase_label = phase_labels.get(phase, phase)
+
+    return f"""
+    <div style="display:flex;align-items:center;gap:16px;padding:10px 16px;
+                background:linear-gradient(135deg,#1e293b 0%,#334155 100%);
+                border-radius:10px;color:white;font-size:13px;">
+        <div style="font-weight:700;font-size:15px;">📋 {html.escape(title)}</div>
+        <div style="opacity:0.7;font-size:11px;font-family:monospace;">ID: {html.escape(pid)}</div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+            <span style="background:rgba(255,255,255,0.15);padding:3px 10px;border-radius:12px;
+                         font-size:11px;">📌 {html.escape(phase_label)}</span>
+        </div>
+    </div>
+    """
+
+
+def render_live_panel_preview(
+    panel_images: list[dict],
+    character_images: list[dict] | None = None,
+) -> str:
+    """渲染实时预览区：角色人设图 + 面板图像。"""
+    if character_images is None:
+        character_images = []
+
+    has_chars = bool(character_images)
+    has_panels = bool(panel_images)
+
+    if not has_chars and not has_panels:
+        return '<div style="color:#64748b;padding:8px;font-size:12px;">⏳ 等待图像生成...</div>'
+
+    parts: list[str] = []
+
+    # 角色人设图
+    if has_chars:
+        char_items = []
+        for ci in character_images:
+            name = ci.get("name", ci.get("char_id", "?"))
+            path = ci.get("image_path", "")
+            img_html = _preview_thumbnail(path, str(name))
+            char_items.append(f"""
+            <div style="display:inline-block;width:140px;margin:4px;vertical-align:top;
+                        background:white;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">
+                {img_html}
+                <div style="padding:4px 6px;">
+                    <div style="font-size:11px;font-weight:600;color:#1e293b;">👤 {html.escape(str(name))}</div>
+                </div>
+            </div>
+            """)
+        parts.append(
+            f'<div style="margin-bottom:6px;font-size:11px;color:#64748b;">'
+            f'👤 角色人设 ({len(character_images)})</div>'
+            f'<div style="white-space:nowrap;overflow-x:auto;padding:4px;">{"".join(char_items)}</div>'
+        )
+
+    # 面板图像
+    if has_panels:
+        panel_items = []
+        for pi in panel_images:
+            pid = pi.get("panel_id", "?") if isinstance(pi, dict) else getattr(pi, "panel_id", "?")
+            path = pi.get("image_path", "") if isinstance(pi, dict) else getattr(pi, "image_path", "")
+            img_html = _preview_thumbnail(str(path), str(pid))
+            panel_items.append(f"""
+            <div style="display:inline-block;width:140px;margin:4px;vertical-align:top;
+                        background:white;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">
+                {img_html}
+                <div style="padding:4px 6px;">
+                    <div style="font-size:11px;font-weight:600;color:#1e293b;">🎨 {html.escape(str(pid))}</div>
+                </div>
+            </div>
+            """)
+        parts.append(
+            f'<div style="margin-bottom:6px;font-size:11px;color:#64748b;">'
+            f'🎨 面板图像 ({len(panel_images)})</div>'
+            f'<div style="white-space:nowrap;overflow-x:auto;padding:4px;">{"".join(panel_items)}</div>'
+        )
+
+    return f"""
+    <div class="cw-live-preview">
+        {"".join(parts)}
+    </div>
+    """
+
+
+def _preview_thumbnail(path: str, alt: str) -> str:
+    """单个预览缩略图（120px 高，cover 裁剪）。"""
+    if path and os.path.exists(str(path)):
+        safe_path = _gradio_img_src(str(path))
+        return (
+            f'<img src="/gradio_api/file={html.escape(safe_path)}" '
+            f'style="width:100%;height:120px;object-fit:cover;border-radius:4px;" '
+            f'alt="{html.escape(alt)}" loading="lazy"/>'
+        )
+    return (
+        f'<div style="width:100%;height:120px;background:#f1f5f9;border-radius:4px;'
+        f'display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:10px;">'
+        f'无图像</div>'
+    )
 
 
 def render_storyboard_detail(plan: list[dict]) -> str:
@@ -844,3 +971,418 @@ def _score_color(val: float) -> str:
     if val >= 4:
         return "linear-gradient(90deg, #fbbf24, #f59e0b)"
     return "linear-gradient(90deg, #f87171, #ef4444)"
+
+
+# ============================================================================
+# Phase 3: 逐页漫画阅读器 + 气泡叠加 + 分镜对比
+# ============================================================================
+
+
+def render_page_reader(
+    final_pages: list[dict],
+    current_idx: int = 0,
+    show_bubbles: bool = False,
+) -> str:
+    """渲染逐页漫画阅读器。
+
+    Parameters
+    ----------
+    final_pages:
+        最终合成页面列表（来自 LayoutOutput.final_pages）。
+    current_idx:
+        当前显示的页面索引（0-based）。
+    show_bubbles:
+        是否叠加对话气泡边界标注。
+    """
+    if not final_pages:
+        return '<div style="color:#64748b;padding:24px;text-align:center;">暂无漫画页面。<br>请先在「创作流程」Tab 运行工作流。</div>'
+
+    total = len(final_pages)
+    idx = max(0, min(current_idx, total - 1))
+    page = final_pages[idx]
+
+    page_id = page.get("page_id", "?")
+    page_num = page.get("page_number", idx + 1)
+    image_path = page.get("image_path", "")
+    width = page.get("width_px", 1240)
+    height = page.get("height_px", 1754)
+    bubbles = page.get("bubbles", [])
+
+    # 主图像
+    img_html = ""
+    if image_path and os.path.exists(str(image_path)):
+        safe_path = _gradio_img_src(str(image_path))
+        img_html = (
+            f'<a href="/gradio_api/file={html.escape(safe_path)}" target="_blank">'
+            f'<img src="/gradio_api/file={html.escape(safe_path)}" '
+            f'style="max-width:100%;max-height:70vh;cursor:zoom-in;border-radius:8px;'
+            f'box-shadow:0 4px 16px rgba(0,0,0,0.15);" '
+            f'alt="第{page_num}页" />'
+            f'</a>'
+        )
+    else:
+        img_html = (
+            f'<div style="width:{min(width, 600)}px;height:{min(height, 800)}px;'
+            f'background:#f1f5f9;border-radius:8px;display:flex;align-items:center;'
+            f'justify-content:center;color:#94a3b8;">'
+            f'页面图像未生成</div>'
+        )
+
+    # 气泡叠加层
+    bubble_overlay = ""
+    if show_bubbles and bubbles:
+        bubble_divs = []
+        for b in bubbles:
+            bbox = b.get("bbox", {})
+            bx = bbox.get("x", 0) if isinstance(bbox, dict) else getattr(bbox, "x", 0)
+            by = bbox.get("y", 0) if isinstance(bbox, dict) else getattr(bbox, "y", 0)
+            bw = bbox.get("width", 0) if isinstance(bbox, dict) else getattr(bbox, "width", 0)
+            bh = bbox.get("height", 0) if isinstance(bbox, dict) else getattr(bbox, "height", 0)
+            text = b.get("text", "")[:30] if isinstance(b, dict) else getattr(b, "text", "")[:30]
+            btype = b.get("bubble_type", "speech") if isinstance(b, dict) else getattr(b, "bubble_type", "speech")
+
+            type_colors = {
+                "speech": "rgba(59,130,246,0.2)", "thought": "rgba(139,92,246,0.2)",
+                "shout": "rgba(239,68,68,0.25)", "whisper": "rgba(168,85,247,0.2)",
+                "narration": "rgba(245,158,11,0.2)",
+            }
+            bg = type_colors.get(btype, "rgba(59,130,246,0.15)")
+
+            bubble_divs.append(
+                f'<div class="cw-bubble-overlay" style="left:{bx*100}%;top:{by*100}%;'
+                f'width:{bw*100}%;height:{bh*100}%;background:{bg};">'
+                f'<span class="cw-bubble-text">{html.escape(text)}</span>'
+                f'</div>'
+            )
+        bubble_overlay = (
+            f'<div style="position:absolute;top:0;left:0;width:100%;height:100%;'
+            f'pointer-events:none;">{"".join(bubble_divs)}</div>'
+        )
+
+    return f"""
+    <div class="cw-page-reader" style="text-align:center;">
+        <div style="margin-bottom:12px;font-size:14px;color:#64748b;">
+            第 <strong style="color:#1e293b;">{page_num}</strong> / {total} 页
+            <span style="margin-left:8px;font-size:12px;color:#94a3b8;">({html.escape(str(page_id))})</span>
+        </div>
+        <div style="position:relative;display:inline-block;max-width:100%;">
+            {img_html}
+            {bubble_overlay}
+        </div>
+        <div class="cw-page-nav" style="margin-top:16px;display:flex;justify-content:center;gap:16px;">
+            <button class="cw-page-nav-btn" {"disabled" if idx == 0 else ""}
+                    style="padding:8px 20px;border:1px solid #d1d5db;border-radius:6px;
+                           background:white;cursor:pointer;font-size:14px;color:#374151;"
+                    onclick="document.dispatchEvent(new CustomEvent('cw-page-nav', {{detail: 'prev'}}))">
+                ◀ 上一页
+            </button>
+            <span style="padding:8px 12px;font-size:14px;color:#64748b;align-self:center;">
+                {idx + 1} / {total}
+            </span>
+            <button class="cw-page-nav-btn" {"disabled" if idx >= total - 1 else ""}
+                    style="padding:8px 20px;border:1px solid #d1d5db;border-radius:6px;
+                           background:white;cursor:pointer;font-size:14px;color:#374151;"
+                    onclick="document.dispatchEvent(new CustomEvent('cw-page-nav', {{detail: 'next'}}))">
+                下一页 ▶
+            </button>
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:#94a3b8;">
+            💡 点击图片可在新标签页中查看原图
+        </div>
+    </div>
+    """
+
+
+def render_comparison_view(plan: list[dict], final_pages: list[dict]) -> str:
+    """渲染分镜规划 vs 最终成品的并排对比。
+
+    将故事板布局（SVG 预览）与最终渲染页面进行并排比较。
+    """
+    if not plan and not final_pages:
+        return '<div style="color:#64748b;padding:12px;">暂无数据。<br>请先在「创作流程」Tab 运行工作流后查看。</div>'
+
+    # 为每个页面匹配 storyboard 和 final page
+    final_by_id: dict[str, dict] = {}
+    for fp in final_pages:
+        pid = fp.get("page_id", "") if isinstance(fp, dict) else getattr(fp, "page_id", "")
+        if pid:
+            final_by_id[pid] = fp
+
+    rows = []
+    for page_data in plan:
+        page_id = page_data.get("page_id", "") if isinstance(page_data, dict) else getattr(page_data, "page_id", "")
+        page_num = page_data.get("page_number", "?") if isinstance(page_data, dict) else getattr(page_data, "page_number", "?")
+
+        # 故事板 SVG
+        storyboard_svg = _render_page_svg(page_data)
+
+        # 最终成品图像
+        final_img = ""
+        matched = final_by_id.get(page_id)
+        if matched:
+            path = matched.get("image_path", "") if isinstance(matched, dict) else getattr(matched, "image_path", "")
+            if path and os.path.exists(str(path)):
+                safe_path = _gradio_img_src(str(path))
+                final_img = (
+                    f'<img src="/gradio_api/file={html.escape(safe_path)}" '
+                    f'style="max-width:100%;max-height:400px;border-radius:6px;'
+                    f'box-shadow:0 2px 8px rgba(0,0,0,0.1);" '
+                    f'alt="第{page_num}页成品" />'
+                )
+            else:
+                final_img = '<div style="color:#94a3b8;padding:40px;">尚未渲染</div>'
+        else:
+            final_img = '<div style="color:#94a3b8;padding:40px;">尚未渲染</div>'
+
+        rows.append(f"""
+        <div class="cw-comparison-row" style="display:flex;gap:16px;margin-bottom:16px;
+                    background:white;border:1px solid #e2e8f0;border-radius:8px;padding:12px;">
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:12px;color:#64748b;margin-bottom:6px;">📐 分镜规划 — 第{page_num}页</div>
+                {storyboard_svg}
+            </div>
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:12px;color:#64748b;margin-bottom:6px;">🎨 最终成品 — 第{page_num}页</div>
+                {final_img}
+            </div>
+        </div>
+        """)
+
+    return f"""
+    <div class="cw-comparison-grid">
+        <h3 style="margin:0 0 12px 0;color:#1e293b;">🔄 分镜 vs 成品对比</h3>
+        {"".join(rows) if rows else '<div style="color:#64748b;padding:12px;">没有可对比的页面。</div>'}
+    </div>
+    """
+
+
+def _render_page_svg(page_data: dict) -> str:
+    """渲染单个页面的故事板 SVG 缩略图。"""
+    panels = page_data.get("panels", []) if isinstance(page_data, dict) else getattr(page_data, "panels", [])
+    if not panels:
+        return '<div style="color:#94a3b8;padding:20px;">无面板数据</div>'
+
+    svg_w = 300
+    svg_h = 420
+    rects = []
+    for i, pnl in enumerate(panels):
+        bbox = pnl.get("bbox", {}) if isinstance(pnl, dict) else getattr(pnl, "bbox", None)
+        if bbox:
+            x = (bbox.get("x", 0) if isinstance(bbox, dict) else getattr(bbox, "x", 0)) * svg_w
+            y = (bbox.get("y", 0) if isinstance(bbox, dict) else getattr(bbox, "y", 0)) * svg_h
+            w = (bbox.get("width", 0.25) if isinstance(bbox, dict) else getattr(bbox, "width", 0.25)) * svg_w
+            h = (bbox.get("height", 0.25) if isinstance(bbox, dict) else getattr(bbox, "height", 0.25)) * svg_h
+        else:
+            # 均匀分布
+            cols = 2
+            rows = (len(panels) + 1) // 2
+            col = i % cols
+            row = i // cols
+            cell_w = svg_w / cols
+            cell_h = svg_h / rows
+            x = col * cell_w + 4
+            y = row * cell_h + 4
+            w = cell_w - 8
+            h = cell_h - 8
+
+        order = pnl.get("order_in_panel", i + 1) if isinstance(pnl, dict) else getattr(pnl, "order_in_panel", i + 1)
+        shot = pnl.get("shot_size", "") if isinstance(pnl, dict) else getattr(pnl, "shot_size", "")
+        shot_label = str(shot)[:2] if shot else "?"
+
+        rects.append(
+            f'<rect x="{x}" y="{y}" width="{w}" height="{h}" '
+            f'fill="rgba(59,130,246,0.15)" stroke="#3b82f6" stroke-width="1.5" rx="2"/>'
+            f'<text x="{x + w/2}" y="{y + h/2 - 6}" text-anchor="middle" '
+            f'font-size="10" fill="#1e40af">{order}</text>'
+            f'<text x="{x + w/2}" y="{y + h/2 + 8}" text-anchor="middle" '
+            f'font-size="8" fill="#64748b">{shot_label}</text>'
+        )
+
+    return f"""
+    <svg width="{svg_w}" height="{svg_h}" style="border:1px solid #e2e8f0;border-radius:4px;
+         background:#fafbfc;">
+        <rect x="0" y="0" width="{svg_w}" height="{svg_h}" fill="#fafbfc" rx="4"/>
+        {"".join(rects)}
+    </svg>
+    """
+
+
+# ============================================================================
+# v0.3 前端重设计：Claude Code 风格渲染函数
+# ============================================================================
+
+_PHASE_AGENTS_V3 = [
+    ("script_agent", "📝 剧本"),
+    ("character_agent", "👤 角色"),
+    ("storyboard_agent", "🎬 分镜"),
+    ("image_agent", "🎨 图像"),
+    ("layout_agent", "📐 排版"),
+]
+
+
+def render_agent_status_bar(active: str, done: list[str]) -> str:
+    """紧凑型 Agent 状态条 — 水平排列的圆点 + 标签。"""
+    pills = []
+    for agent_id, label in _PHASE_AGENTS_V3:
+        if agent_id == active:
+            cls = "active"
+            dot = "●"
+        elif agent_id in done:
+            cls = "done"
+            dot = "✓"
+        else:
+            cls = "pending"
+            dot = "○"
+        pills.append(
+            f'<span class="cw-as-pill cw-as-{cls}">'
+            f'{dot} {label}'
+            f'</span>'
+        )
+    return f"""
+    <div class="cw-agent-status">
+        {''.join(pills)}
+    </div>
+    """
+
+
+def render_stream_log(events: list[dict]) -> str:
+    """Claude Code 风格流式日志 — 暗色终端，时间线事件。
+
+    事件类型与样式映射：
+    - thinking → 紫色，左侧缩进
+    - progress → 蓝色进度条
+    - log / dev_* → 灰色信息
+    - done → 绿色 ✓
+    - error → 红色 ✗
+    - checkpoint → 黄色高亮
+    """
+    if not events:
+        return '<div class="cw-stream-log"><div class="cw-stream-empty">等待工作流启动...</div></div>'
+
+    lines = []
+    for evt in events[-80:]:  # 最近 80 条
+        ts = evt.get("timestamp", 0)
+        time_str = time.strftime("%H:%M:%S", time.localtime(ts)) if ts else "--:--:--"
+        evt_type = str(evt.get("type", "log"))
+        content = str(evt.get("content", ""))
+        agent = str(evt.get("agent", ""))
+
+        # 类型 → CSS class + 图标
+        type_css, icon = _stream_entry_style(evt_type, content)
+
+        # 构造条目
+        lines.append(
+            f'<div class="cw-stream-entry {type_css}">'
+            f'<span class="cw-stream-time">{time_str}</span> '
+            f'<span class="cw-stream-icon">{icon}</span> '
+            f'<span class="cw-stream-content">{html.escape(content)}</span>'
+            f'</div>'
+        )
+
+    return f"""
+    <div class="cw-stream-log" id="cw-stream-log">
+        {"".join(lines)}
+    </div>
+    """
+
+
+def _stream_entry_style(evt_type: str, content: str) -> tuple[str, str]:
+    """Map event type to CSS class and icon."""
+    if evt_type in ("thinking", "progress"):
+        return "cw-stream-thinking", "💭"
+    if evt_type == "done":
+        return "cw-stream-done", "✓"
+    if evt_type == "error":
+        return "cw-stream-error", "✗"
+    if evt_type == "checkpoint":
+        return "cw-stream-checkpoint", "⏸"
+    if evt_type.startswith("dev_"):
+        return "cw-stream-debug", "🔧"
+    if evt_type == "partial":
+        return "cw-stream-partial", "📤"
+    return "cw-stream-info", "▸"
+
+
+def render_project_cards(projects: list[dict]) -> str:
+    """以卡片网格展示已保存的项目列表。
+
+    每个 dict 应有: project_id, title, updated_at_str, phase
+    """
+    if not projects:
+        return '<div class="cw-stream-empty">暂无已保存的项目。<br>在「项目」Tab 创建新项目后运行工作流，项目会自动保存。</div>'
+
+    phase_labels = {
+        "init": "等待开始", "script": "剧本", "character": "角色",
+        "storyboard": "分镜", "image": "图像", "layout": "排版",
+    }
+
+    cards = []
+    for p in projects:
+        pid = p.get("project_id", "?")
+        title = p.get("title", "未命名")
+        updated = p.get("updated_at_str", "?")
+        phase = p.get("phase", "init")
+        phase_label = phase_labels.get(phase, phase)
+
+        cards.append(f"""
+        <div class="cw-project-card" onclick="document.dispatchEvent(
+            new CustomEvent('cw-select-project', {{detail: '{html.escape(pid)}'}}))">
+            <div class="cw-project-card-title">{html.escape(title)}</div>
+            <div class="cw-project-card-id">{html.escape(pid)}</div>
+            <div class="cw-project-card-meta">
+                <span class="cw-badge">{phase_label}</span>
+                <span style="font-size:11px;color:#94a3b8;">{html.escape(updated)}</span>
+            </div>
+        </div>
+        """)
+
+    return f"""
+    <div class="cw-project-cards">
+        {"".join(cards)}
+    </div>
+    """
+
+
+def render_workflow_left(
+    active: str,
+    done: list[str],
+    events: list[dict],
+    checkpoint: dict | None,
+) -> str:
+    """组合渲染工作流左栏：状态条 + 流式日志 + checkpoint。"""
+    status = render_agent_status_bar(active, done)
+    log = render_stream_log(events)
+    cp = render_inline_checkpoint(checkpoint)
+    return f"""
+    <div class="cw-workflow-left">
+        {status}
+        {log}
+        {cp}
+    </div>
+    """
+
+
+def render_inline_checkpoint(checkpoint: dict | None) -> str:
+    """内联 Checkpoint 面板 — 嵌入在流式日志底部。"""
+    if not checkpoint:
+        return ""
+
+    label = checkpoint.get("label", "确认")
+    payload = checkpoint.get("payload", {})
+    phase = payload.get("phase", "?")
+    pid = payload.get("project_id", "?")
+
+    items = "".join(
+        f'<span style="margin-right:12px;font-size:12px;"><strong>{html.escape(str(k))}</strong>: {html.escape(str(v)[:40])}</span>'
+        for k, v in payload.items()
+    )
+
+    return f"""
+    <div class="cw-inline-checkpoint">
+        <div class="cw-checkpoint-header">
+            ⏸ <strong>{html.escape(label)}</strong>
+        </div>
+        <div class="cw-checkpoint-meta">{items}</div>
+        <div class="cw-checkpoint-hint">请在上方按钮中选择「接受并继续」或「重新生成」</div>
+    </div>
+    """

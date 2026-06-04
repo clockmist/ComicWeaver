@@ -54,7 +54,7 @@ class CheckpointSignal:
     label: str
     payload: dict
     user_options: list[str] = field(
-        default_factory=lambda: ["accept", "regenerate", "skip"]
+        default_factory=lambda: ["accept", "regenerate"]
     )
     timestamp: float = field(default_factory=time.time)
 

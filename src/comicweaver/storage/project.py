@@ -51,6 +51,10 @@ def project_to_state(project: ComicProject) -> ComicState:
 def state_to_project(state: ComicState, title: str = "") -> ComicProject:
     return ComicProject(
         project_id=state.get("project_id", ""),
-        title=title or state.get("user_input", "Untitled")[:30],
+        title=(
+            title
+            or state.get("title", "")
+            or state.get("user_input", "Untitled")[:30]
+        ),
         state=dict(state),
     )

@@ -41,6 +41,7 @@ from comicweaver.core import (
     StoryboardInput,
     StreamEventType,
 )
+from comicweaver.storage import save_project, state_to_project
 from comicweaver.utils.logging import (
     log_agent_error,
     log_agent_input,
@@ -58,7 +59,13 @@ from comicweaver.utils.logging import (
     summarize_storyboard_output,
 )
 
-from .types import WorkflowEvent, WorkflowMessage
+from .types import (
+    CheckpointSignal,
+    KEY_CHECKPOINTS,
+    WorkflowEvent,
+    WorkflowMessage,
+    should_pause,
+)
 
 class ComicWorkflow:
     """漫画创作工作流执行器（基于 LangGraph StateGraph）。
@@ -70,15 +77,22 @@ class ComicWorkflow:
 
         # 用户响应确认点
         wf.respond("accept")
+
+    恢复已保存项目:
+        wf = ComicWorkflow.from_saved_project(project_id)
+        async for msg in wf.arun(wf._saved_state):
+            ...
     """
 
-    def __init__(self) -> None:
+    def __init__(self, resume_phase: str | None = None) -> None:
         self.config = load_config()
         self.script_agent = ScriptAgent()
         self.character_agent = CharacterAgent()
         self.storyboard_agent = StoryboardAgent()
         self.image_agent = ImageAgent()
         self.layout_agent = LayoutAgent()
+
+        self._resume_phase = resume_phase
 
         # 构建并编译 LangGraph 图
         self._graph = self._build_graph()
@@ -88,6 +102,14 @@ class ComicWorkflow:
         self._response_queue: asyncio.Queue | None = None
         self._loop_for_response: asyncio.AbstractEventLoop | None = None
         self._current_config: dict | None = None
+
+        # Checkpoint pause/resume
+        self._response_event: asyncio.Event | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._last_decision: str | None = None
+
+        # 跨会话恢复：存储已加载的 state
+        self._saved_state: ComicState | None = None
 
     def _ensure_queue(self) -> asyncio.Queue:
         if self._response_queue is None:
@@ -108,13 +130,26 @@ class ComicWorkflow:
         builder.add_node("image", self._node_image)
         builder.add_node("layout", self._node_layout)
 
-        # -- 边：START → script → character → storyboard → image → layout → END --
-        builder.add_edge(START, "script")
+        # -- 边：script → character → storyboard → image → layout → END --
         builder.add_edge("script", "character")
         builder.add_edge("character", "storyboard")
         builder.add_edge("storyboard", "image")
         builder.add_edge("image", "layout")
         builder.add_edge("layout", END)
+
+        # -- 入口：根据 resume_phase 决定从哪个节点开始 --
+        phase_to_node: dict[str, str] = {
+            "init": "script",
+            "script": "character",
+            "character": "storyboard",
+            "storyboard": "image",
+            "image": "layout",
+            "layout": "layout",
+        }
+        start_node = "script"
+        if self._resume_phase and self._resume_phase in phase_to_node:
+            start_node = phase_to_node[self._resume_phase]
+        builder.add_edge(START, start_node)
 
         return builder
 
@@ -145,19 +180,37 @@ class ComicWorkflow:
             "style_hint": inputs.style_hint or "none",
         }))
 
-        try:
-            async for evt in self.script_agent.astream(inputs, ctx):
-                writer(evt)
-                if evt.type == StreamEventType.DONE and evt.content:
-                    state["structured_script"] = evt.content
-                    state["emotion_curve"] = evt.content.get("emotion_curve", [])
-                    # 开发者日志：Agent 输出摘要
-                    writer(log_agent_output("script_agent",
-                        summarize_script_output(evt.content)))
-        except Exception as exc:
-            writer(log_agent_error("script_agent", f"执行失败: {exc}",
-                {"raw_text": inputs.raw_text[:100], "error_type": type(exc).__name__}))
-            raise
+        # --- Regenerate loop: 用户选择"重新生成"时重新执行 agent ---
+        while True:
+            try:
+                async for evt in self.script_agent.astream(inputs, ctx):
+                    writer(evt)
+                    if evt.type == StreamEventType.DONE and evt.content:
+                        state["structured_script"] = evt.content
+                        state["emotion_curve"] = evt.content.get("emotion_curve", [])
+                        writer(log_agent_output("script_agent",
+                            summarize_script_output(evt.content)))
+            except Exception as exc:
+                writer(log_agent_error("script_agent", f"执行失败: {exc}",
+                    {"raw_text": inputs.raw_text[:100], "error_type": type(exc).__name__}))
+                raise
+
+            # --- Checkpoint & auto-save ---
+            self._save_checkpoint(state)
+            if not should_pause(state, "after_script"):
+                break
+            writer(CheckpointSignal(
+                checkpoint_id="after_script",
+                label=KEY_CHECKPOINTS["after_script"],
+                payload={
+                    "phase": state.get("current_phase", "?"),
+                    "project_id": state.get("project_id", "?"),
+                },
+            ))
+            await self._await_response()
+            if self._last_decision != "regenerate":
+                break
+            # 用户选择重新生成 → 循环回到 agent 执行
 
         elapsed = (time.perf_counter() - t0) * 1000
         writer(log_performance("script_agent", elapsed))
@@ -191,37 +244,55 @@ class ComicWorkflow:
             "style_preset": state.get("style_preset", "manga"),
         }))
 
-        try:
-            async for evt in self.character_agent.astream(inputs, ctx):
-                writer(evt)
-                if evt.type == StreamEventType.DONE and evt.content:
-                    state["character_db"] = evt.content.get("character_db") or {}
-                    writer(log_agent_output("character_agent",
-                        summarize_character_output(evt.content)))
-                    # 记录每个角色的 ComfyUI 生成参数（种子 + 外观 prompt）
-                    cdb = evt.content.get("character_db") or {}
-                    chars = cdb.get("characters", {})
-                    for cid, cp in chars.items():
-                        writer(log_comfyui_request(
-                            "character_agent",
-                            kind="character_reference",
-                            prompt=cp.get("base_reference", {}).get("generation_prompt", ""),
-                            negative_prompt="(see agent hardcoded negative)",
-                            seed=cp.get("seed", 0),
-                            width=1024,
-                            height=1024,
-                            workflow_path=self.config.image.workflow_character_path,
-                            metadata={
-                                "char_id": cid,
-                                "name": cp.get("name", ""),
-                                "appearance_prompt": cp.get("appearance_prompt", ""),
-                                "gender_tag": cp.get("gender_tag", "1girl"),
-                            },
-                        ))
-        except Exception as exc:
-            writer(log_agent_error("character_agent", f"执行失败: {exc}",
-                {"drafts": [d.name for d in drafts], "error_type": type(exc).__name__}))
-            raise
+        # --- Regenerate loop ---
+        while True:
+            try:
+                async for evt in self.character_agent.astream(inputs, ctx):
+                    writer(evt)
+                    if evt.type == StreamEventType.DONE and evt.content:
+                        state["character_db"] = evt.content.get("character_db") or {}
+                        writer(log_agent_output("character_agent",
+                            summarize_character_output(evt.content)))
+                        # 记录每个角色的 ComfyUI 生成参数（种子 + 外观 prompt）
+                        cdb = evt.content.get("character_db") or {}
+                        chars = cdb.get("characters", {})
+                        for cid, cp in chars.items():
+                            writer(log_comfyui_request(
+                                "character_agent",
+                                kind="character_reference",
+                                prompt=cp.get("base_reference", {}).get("generation_prompt", ""),
+                                negative_prompt="(see agent hardcoded negative)",
+                                seed=cp.get("seed", 0),
+                                width=1024,
+                                height=1024,
+                                workflow_path=self.config.image.workflow_character_path,
+                                metadata={
+                                    "char_id": cid,
+                                    "name": cp.get("name", ""),
+                                    "appearance_prompt": cp.get("appearance_prompt", ""),
+                                    "gender_tag": cp.get("gender_tag", "1girl"),
+                                },
+                            ))
+            except Exception as exc:
+                writer(log_agent_error("character_agent", f"执行失败: {exc}",
+                    {"drafts": [d.name for d in drafts], "error_type": type(exc).__name__}))
+                raise
+
+            # --- Checkpoint & auto-save ---
+            self._save_checkpoint(state)
+            if not should_pause(state, "after_character"):
+                break
+            writer(CheckpointSignal(
+                checkpoint_id="after_character",
+                label=KEY_CHECKPOINTS["after_character"],
+                payload={
+                    "phase": state.get("current_phase", "?"),
+                    "project_id": state.get("project_id", "?"),
+                },
+            ))
+            await self._await_response()
+            if self._last_decision != "regenerate":
+                break
 
         elapsed = (time.perf_counter() - t0) * 1000
         writer(log_performance("character_agent", elapsed))
@@ -259,23 +330,41 @@ class ComicWorkflow:
             "has_character_db": cdb is not None,
         }))
 
-        try:
-            async for evt in self.storyboard_agent.astream(inputs, ctx):
-                writer(evt)
-                if evt.type == StreamEventType.DONE and evt.content:
-                    pages = evt.content.get("pages", [])
-                    if not pages:
-                        raise ApiBackendError(
-                            "StoryboardAgent returned empty pages — "
-                            "LLM did not generate any panel designs"
-                        )
-                    state["storyboard_plan"] = pages
-                    writer(log_agent_output("storyboard_agent",
-                        summarize_storyboard_output(evt.content)))
-        except Exception as exc:
-            writer(log_agent_error("storyboard_agent", f"执行失败: {exc}",
-                {"scene_count": len(scenes), "target_pages": inputs.target_pages, "error_type": type(exc).__name__}))
-            raise
+        # --- Regenerate loop ---
+        while True:
+            try:
+                async for evt in self.storyboard_agent.astream(inputs, ctx):
+                    writer(evt)
+                    if evt.type == StreamEventType.DONE and evt.content:
+                        pages = evt.content.get("pages", [])
+                        if not pages:
+                            raise ApiBackendError(
+                                "StoryboardAgent returned empty pages — "
+                                "LLM did not generate any panel designs"
+                            )
+                        state["storyboard_plan"] = pages
+                        writer(log_agent_output("storyboard_agent",
+                            summarize_storyboard_output(evt.content)))
+            except Exception as exc:
+                writer(log_agent_error("storyboard_agent", f"执行失败: {exc}",
+                    {"scene_count": len(scenes), "target_pages": inputs.target_pages, "error_type": type(exc).__name__}))
+                raise
+
+            # --- Checkpoint & auto-save ---
+            self._save_checkpoint(state)
+            if not should_pause(state, "after_storyboard"):
+                break
+            writer(CheckpointSignal(
+                checkpoint_id="after_storyboard",
+                label=KEY_CHECKPOINTS["after_storyboard"],
+                payload={
+                    "phase": state.get("current_phase", "?"),
+                    "project_id": state.get("project_id", "?"),
+                },
+            ))
+            await self._await_response()
+            if self._last_decision != "regenerate":
+                break
 
         elapsed = (time.perf_counter() - t0) * 1000
         writer(log_performance("storyboard_agent", elapsed))
@@ -412,18 +501,36 @@ class ComicWorkflow:
             "export_formats": inputs.export_formats,
         }))
 
-        try:
-            async for evt in self.layout_agent.astream(inputs, ctx):
-                writer(evt)
-                if evt.type == StreamEventType.DONE and evt.content:
-                    state["final_pages"] = evt.content.get("final_pages", [])
-                    state["exports"] = evt.content.get("exports", [])
-                    writer(log_agent_output("layout_agent",
-                        summarize_layout_output(evt.content)))
-        except Exception:
-            writer(log_agent_error("layout_agent", "执行失败",
-                {"page_count": len(pages), "panel_count": len(panel_imgs)}))
-            raise
+        # --- Regenerate loop ---
+        while True:
+            try:
+                async for evt in self.layout_agent.astream(inputs, ctx):
+                    writer(evt)
+                    if evt.type == StreamEventType.DONE and evt.content:
+                        state["final_pages"] = evt.content.get("final_pages", [])
+                        state["exports"] = evt.content.get("exports", [])
+                        writer(log_agent_output("layout_agent",
+                            summarize_layout_output(evt.content)))
+            except Exception:
+                writer(log_agent_error("layout_agent", "执行失败",
+                    {"page_count": len(pages), "panel_count": len(panel_imgs)}))
+                raise
+
+            # --- Checkpoint & auto-save ---
+            self._save_checkpoint(state)
+            if not should_pause(state, "after_layout"):
+                break
+            writer(CheckpointSignal(
+                checkpoint_id="after_layout",
+                label=KEY_CHECKPOINTS["after_layout"],
+                payload={
+                    "phase": state.get("current_phase", "?"),
+                    "project_id": state.get("project_id", "?"),
+                },
+            ))
+            await self._await_response()
+            if self._last_decision != "regenerate":
+                break
 
         elapsed = (time.perf_counter() - t0) * 1000
         writer(log_performance("layout_agent", elapsed))
@@ -437,11 +544,27 @@ class ComicWorkflow:
     async def arun(self, state: ComicState) -> AsyncIterator[object]:
         """异步执行工作流，流式吐出消息。
 
-        简化的线性流水线（无审查/确认），5 个 Agent 顺序执行。
+        线性流水线，5 个 Agent 顺序执行。
+        支持 CheckpointSignal 暂停与 resume。
         """
+        # 捕获事件循环引用（供 respond() 线程安全调用）
+        self._loop = asyncio.get_running_loop()
+
+        # 跨会话恢复：合并已保存的 state
+        if self._saved_state is not None:
+            for key, value in self._saved_state.items():
+                if key not in state or not state[key]:
+                    state[key] = value  # type: ignore[literal-required]
+
         workflow_t0 = time.perf_counter()
+        resume_note = ""
+        if self._resume_phase and self._resume_phase not in ("init",):
+            resume_note = f" (从 {self._resume_phase} 恢复)"
         yield WorkflowMessage(WorkflowEvent.NODE_START, "workflow")
-        yield log_workflow_event("工作流启动", f"project={state.get('project_id', '?')}")
+        yield log_workflow_event(
+            f"工作流启动{resume_note}",
+            f"project={state.get('project_id', '?')}",
+        )
 
         config: dict[str, Any] = {
             "configurable": {"thread_id": state.get("project_id", "default")}
@@ -482,6 +605,49 @@ class ComicWorkflow:
             f"耗时 {total_elapsed:.0f}ms, "
             f"pages={len(state.get('final_pages', []))}")
         yield WorkflowMessage(WorkflowEvent.WORKFLOW_DONE, "workflow", state)
+
+    # ------------------------------------------------------------------
+    # Checkpoint / Resume 机制
+    # ------------------------------------------------------------------
+
+    def _save_checkpoint(self, state: ComicState) -> None:
+        """在每个 Agent 完成后自动保存项目状态。"""
+        try:
+            proj = state_to_project(state)
+            save_project(proj)
+        except Exception:
+            pass  # 保存失败不应中断工作流
+
+    async def _await_response(self) -> None:
+        """阻塞当前节点，直到 UI 线程调用 respond() 恢复。"""
+        self._response_event = asyncio.Event()
+        await self._response_event.wait()
+
+    def respond(self, decision: str) -> None:
+        """由 UI 线程调用，恢复暂停的工作流。
+
+        使用 call_soon_threadsafe 安全地通知后台 asyncio 事件循环。
+        """
+        self._last_decision = decision
+        if self._response_event and self._loop and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._response_event.set)
+
+    @classmethod
+    def from_saved_project(cls, project_id: str) -> "ComicWorkflow | None":
+        """从已保存的项目创建可恢复的 ComicWorkflow。
+
+        加载 project.json，读取 current_phase，构造从对应节点开始的工作流。
+        返回 None 表示项目不存在或无法加载。
+        """
+        from comicweaver.storage import load_project, project_to_state
+        project = load_project(project_id)
+        if project is None:
+            return None
+        state = project_to_state(project)
+        phase = state.get("current_phase", "init")
+        wf = cls(resume_phase=phase)
+        wf._saved_state = state
+        return wf
 
     # ------------------------------------------------------------------
     # 辅助方法
