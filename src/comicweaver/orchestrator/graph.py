@@ -26,12 +26,14 @@ from comicweaver.agents import (
 from comicweaver.api import ApiBackendError
 from comicweaver.config import load_config
 from comicweaver.core import (
+    Action,
     AgentContext,
     CharacterDB,
     CharacterDraft,
     CharacterInput,
     ComicState,
     CreationMode,
+    Dialogue,
     ImageInput,
     InteractionMode,
     LayoutInput,
@@ -129,18 +131,18 @@ class ComicWorkflow:
     def _build_graph(self) -> StateGraph:
         builder = StateGraph(ComicState)
 
-        # -- 6 个生产节点，线性串联 (v0.4: +story) --
+        # -- 6 个生产节点，线性串联 (v1.0: character 移到 script 之前) --
         builder.add_node("story", self._node_story)
-        builder.add_node("script", self._node_script)
         builder.add_node("character", self._node_character)
+        builder.add_node("script", self._node_script)
         builder.add_node("storyboard", self._node_storyboard)
         builder.add_node("image", self._node_image)
         builder.add_node("layout", self._node_layout)
 
-        # -- 边：story → script → character → storyboard → image → layout → END --
-        builder.add_edge("story", "script")
-        builder.add_edge("script", "character")
-        builder.add_edge("character", "storyboard")
+        # -- 边：story → character → script → storyboard → image → layout → END --
+        builder.add_edge("story", "character")
+        builder.add_edge("character", "script")
+        builder.add_edge("script", "storyboard")
         builder.add_edge("storyboard", "image")
         builder.add_edge("image", "layout")
         builder.add_edge("layout", END)
@@ -241,14 +243,18 @@ class ComicWorkflow:
         state["current_phase"] = "script"
         ctx = self._make_context(state)
 
-        # v0.4: Build story from state if available
+        # v1.0: Build story + character_db for context-aware script generation
         story_dict = state.get("developed_story") or {}
         story = StoryOutput.model_validate(story_dict) if story_dict else None
+
+        cdb_dict = state.get("character_db") or {}
+        character_db = CharacterDB.model_validate(cdb_dict) if cdb_dict else None
 
         inputs = ScriptInput(
             creation_mode=CreationMode(state.get("creation_mode", "simple")),
             raw_text=state.get("user_input", ""),
             story=story,
+            character_db=character_db,
             target_pages=state.get("target_pages", 4),
             style_hint=state.get("style_preset", "manga"),
         )
@@ -256,8 +262,8 @@ class ComicWorkflow:
         # 开发者日志：Agent 输入
         writer(log_agent_input("script_agent", {
             "creation_mode": inputs.creation_mode.value,
-            "raw_text": inputs.raw_text[:200],
             "has_story": story is not None,
+            "has_character_db": character_db is not None,
             "target_pages": inputs.target_pages,
             "style_hint": inputs.style_hint or "none",
         }))
@@ -269,16 +275,12 @@ class ComicWorkflow:
                     writer(evt)
                     if evt.type == StreamEventType.DONE and evt.content:
                         state["structured_script"] = evt.content
-                        state["emotion_curve"] = evt.content.get("emotion_curve", [])
-                        # v0.4: Extract NarrativeStructure from script output
-                        ns = evt.content.get("narrative_structure")
-                        if ns:
-                            state["narrative_structure"] = ns
                         writer(log_agent_output("script_agent",
                             summarize_script_output(evt.content)))
             except Exception as exc:
                 writer(log_agent_error("script_agent", f"执行失败: {exc}",
-                    {"raw_text": inputs.raw_text[:100], "error_type": type(exc).__name__}))
+                    {"raw_text": (story.story_text if story else inputs.raw_text)[:100],
+                     "error_type": type(exc).__name__}))
                 raise
 
             # --- Checkpoint & auto-save ---
@@ -296,9 +298,7 @@ class ComicWorkflow:
             await self._await_response()
             if self._last_decision != "regenerate":
                 break
-            # 用户选择重新生成 → 清除旧数据，循环回到 agent 执行
             state["structured_script"] = {}
-            state["emotion_curve"] = []
             if self._last_guidance:
                 writer(log_workflow_event("用户指导", self._last_guidance[:200]))
 
@@ -315,11 +315,11 @@ class ComicWorkflow:
 
         state["current_phase"] = "character"
         ctx = self._make_context(state)
-        script_dict = state.get("structured_script", {})
-        drafts = [
-            CharacterDraft.model_validate(c)
-            for c in script_dict.get("characters", [])
-        ]
+
+        # v1.0: 从 StoryOutput.characters 构建 CharacterDraft（而非 ScriptOutput）
+        story_dict = state.get("developed_story") or {}
+        story_chars = story_dict.get("characters", []) if story_dict else []
+        drafts = _story_chars_to_drafts(story_chars)
         inputs = CharacterInput(
             operation="init",
             character_drafts=drafts,
@@ -402,13 +402,20 @@ class ComicWorkflow:
         state["current_phase"] = "storyboard"
         ctx = self._make_context(state)
         script_dict = state.get("structured_script", {})
-        scenes = [Scene.model_validate(s) for s in script_dict.get("scenes", [])]
+
+        # v1.0: 优先读新格式 pages (PanelTask)，兼容旧格式 scenes
+        raw_pages = script_dict.get("pages") or []
+        if raw_pages:
+            scenes = _panel_tasks_to_scenes(raw_pages)
+        else:
+            scenes = [Scene.model_validate(s) for s in script_dict.get("scenes", [])]
+
         cdb_dict = state.get("character_db") or {}
         cdb = CharacterDB.model_validate(cdb_dict) if cdb_dict else None
 
-        # v0.4: Build story summary and narrative structure from state
+        # Build story context
         story_dict = state.get("developed_story") or {}
-        story_summary = story_dict.get("summary", "") if story_dict else ""
+        story_summary = story_dict.get("author_note", "") or story_dict.get("story_text", "")[:200] if story_dict else ""
         ns_dict = state.get("narrative_structure") or {}
         narrative_structure = NarrativeStructure.model_validate(ns_dict) if ns_dict else None
 
@@ -425,9 +432,7 @@ class ComicWorkflow:
         # 开发者日志：Agent 输入
         writer(log_agent_input("storyboard_agent", {
             "scene_count": len(scenes),
-            "emotion_curve_peaks": (
-                max(state.get("emotion_curve", [0])) if state.get("emotion_curve") else 0
-            ),
+            "source_format": "pages(v1.0)" if raw_pages else "scenes(legacy)",
             "target_pages": inputs.target_pages,
             "has_character_db": cdb is not None,
         }))
@@ -815,3 +820,55 @@ class ComicWorkflow:
             style_preset=state.get("style_preset", "manga"),
             creation_mode=CreationMode(state.get("creation_mode", "simple")),
         )
+
+
+# ---------------------------------------------------------------------------
+# 模块级辅助函数
+# ---------------------------------------------------------------------------
+
+def _story_chars_to_drafts(story_chars: list[dict]) -> list[CharacterDraft]:
+    """v1.0: 将 StoryOutput.characters 转换为 CharacterDraft 列表。"""
+    drafts = []
+    for i, c in enumerate(story_chars):
+        drafts.append(CharacterDraft(
+            char_id=f"char_{i:03d}",
+            name=c.get("name", f"角色{i}"),
+            role=c.get("role", "supporting"),
+            appearance=c.get("brief_description", ""),
+            first_appearance_scene=0,
+        ))
+    return drafts
+
+
+def _panel_tasks_to_scenes(raw_pages: list[dict]) -> list[Scene]:
+    """v1.0 桥接：将新格式 pages(PanelTask) 转换为旧格式 scenes(Scene)。
+
+    StoryboardAgent 暂时仍消费 Scene，后续改造后移除。
+    每个 PanelTask 映射为一个 panel_hint=1 的 Scene。
+    """
+    scenes = []
+    for page in raw_pages:
+        page_num = page.get("page_number", 1)
+        for panel in page.get("panels", []):
+            panel_id = panel.get("panel_id", "")
+            char_id = panel.get("character_id", "")
+            scenes.append(Scene(
+                scene_id=panel_id,
+                order=len(scenes),
+                location=panel.get("location", ""),
+                time_of_day=panel.get("time_of_day", ""),
+                atmosphere=panel.get("atmosphere", ""),
+                characters_present=[char_id] if char_id else [],
+                actions=[Action(actor=char_id, description=panel.get("character_action", ""))]
+                    if panel.get("character_action") else [],
+                dialogues=[Dialogue(
+                    speaker=char_id,
+                    text=panel.get("dialogue_text", ""),
+                    tone=panel.get("dialogue_tone", "neutral"),
+                    is_thought=panel.get("is_thought", False),
+                )] if panel.get("dialogue_text") else [],
+                narration=panel.get("narration") or None,
+                emotion_intensity=panel.get("emotion_intensity", 0.5),
+                panel_hint=1,
+            ))
+    return scenes

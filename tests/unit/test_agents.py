@@ -27,6 +27,7 @@ from comicweaver.core import (
 
 @pytest.mark.asyncio
 async def test_script_agent():
+    """ScriptAgent v1.0 — requires LLM. Test output schema with pre-populated story."""
     agent = ScriptAgent()
     ctx = AgentContext(
         project_id="test",
@@ -34,16 +35,27 @@ async def test_script_agent():
         style_preset="manga",
         creation_mode=CreationMode.SIMPLE,
     )
+    # ScriptAgent requires LLM — skip if not available
+    if not agent.config.llm.is_available:
+        pytest.skip("LLM API not configured — ScriptAgent requires LLM")
+
+    from comicweaver.core import StoryOutput
+    story = StoryOutput(
+        title="测试",
+        story_text="一个少年在雨夜寻找失踪的朋友。",
+        characters=[{"name": "少年", "role": "protagonist", "brief_description": "勇敢的年轻人"}],
+    )
     inp = ScriptInput(
         creation_mode=CreationMode.SIMPLE,
-        raw_text="一个少年在雨夜寻找朋友",
-        target_pages=4,
+        story=story,
+        target_pages=2,
+        target_panels_per_page=3,
     )
     out = await agent.run(inp, ctx)
     assert out.title
-    assert len(out.scenes) >= 4
-    assert len(out.characters) >= 2
-    assert len(out.emotion_curve) == len(out.scenes)
+    assert len(out.pages) >= 1
+    total_panels = sum(len(p.panels) for p in out.pages)
+    assert total_panels >= 2
 
 
 @pytest.mark.asyncio

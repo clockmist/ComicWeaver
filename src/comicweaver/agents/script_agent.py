@@ -1,12 +1,15 @@
-"""Script understanding agent.
+"""Script agent — v1.0 panel-level narrative tasks.
 
-The agent prefers a configured JSON LLM API and falls back to a deterministic
-local generator when no backend is configured.
+Transforms a developed story + character designs into a page-by-page,
+panel-by-panel script. Each panel gets a clear narrative purpose — WHAT
+this panel needs to communicate to the reader.
+
+Does NOT define visual/cinematography details (shot size, camera angle,
+pose hints). Those are left for the StoryboardAgent downstream.
 """
 from __future__ import annotations
 
 import asyncio
-import random
 from collections.abc import AsyncIterator
 
 from comicweaver.api import ApiBackendError, OpenAICompatibleLLMClient
@@ -14,202 +17,185 @@ from comicweaver.core import (
     AgentContext,
     AgentOutputMeta,
     BaseAgent,
+    CharacterDB,
     CharacterDraft,
     CreationMode,
     Dialogue,
     NarrativeStructure,
+    PanelTask,
     Scene,
     ScriptInput,
     ScriptOutput,
+    ScriptPage,
     StreamEvent,
     StreamEventType,
 )
 
-_MOCK_CHARACTERS = [
-    ("林染", "protagonist", "男性,短发凌乱,丹凤眼,宽松连帽衫配修身长裤,瘦高身材"),
-    ("陈夜", "antagonist", "男性,灰色长直发,细长眼,修身长袍,高瘦身形"),
-    ("苏白", "supporting", "女性,波浪短发,大圆眼,荷叶边衬衫配百褶裙,娇小身材"),
-]
 
-_MOCK_LOCATIONS = ["雨夜城市街道", "废弃工厂", "霓虹咖啡馆", "天台",
-                    "地铁站", "图书馆", "山顶观景台"]
-_MOCK_ATMOSPHERES = ["阴郁压抑", "紧张悬疑", "温暖怀旧", "明亮欢快", "孤独沉静"]
+def _build_character_context(character_db: CharacterDB | None) -> str:
+    """Build a character reference block for the LLM prompt (v1.0)."""
+    if not character_db or not character_db.characters:
+        return ""
+
+    lines = ["=== CHARACTER DESIGNS (use these in your script) ==="]
+    for cid, cp in character_db.characters.items():
+        vt = cp.visual_traits
+        lines.append(
+            f"- {cid}: {cp.name}"
+            f" | gender_tag: {cp.gender_tag}"
+            f" | hair: {vt.hair}"
+            f" | eyes: {vt.eyes}"
+            f" | body: {vt.body}"
+            f" | clothing: {vt.clothing}"
+            f" | tags: {cp.core_tags[:120] if cp.core_tags else 'N/A'}"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+_PANEL_SCRIPT_SYSTEM_PROMPT = """You are a professional comic script writer. Your job is to take a developed story and character designs, then produce a PANEL-BY-PANEL comic script. Each panel gets a clear NARRATIVE PURPOSE — what this panel needs to communicate to the reader.
+
+CRITICAL: You are writing a PERFORMABLE SCRIPT, not visual directions. Do NOT specify shot sizes, camera angles, poses, expressions, lighting, or weather. Those are cinematography decisions handled by a downstream agent. You define WHAT each panel must accomplish narratively.
+
+Each panel typically focuses on ONE character. Some panels may have NO character (establishing shots, scene transitions, atmosphere panels, narration-only panels).
+
+Return a single JSON object matching this EXACT structure:
+{
+  "title": "Comic title",
+  "summary": "1-2 sentence summary",
+  "genre": ["genre1", "genre2"],
+  "pages": [
+    {
+      "page_number": 1,
+      "page_note": "Optional page-level narrative note (e.g., 'This page establishes the world and introduces the protagonist')",
+      "panels": [
+        {
+          "panel_id": "page_001_p01",
+          "page_number": 1,
+          "order_in_page": 1,
+          "narrative_purpose": "What this panel must accomplish narratively. Be specific. Examples: 'Establish the rainy city setting and mood of isolation', 'Introduce the protagonist — show his determination despite exhaustion', 'Reaction beat — his hope shatters as he reads the letter', 'Deliver the key revelation dialogue', 'Transition — time passes, storm clears'",
+          "character_id": "char_000",
+          "character_action": "WHAT the character does in this panel (narrative action, not visual pose). e.g., 'searches frantically through old photographs', 'slumps against the wall in defeat', 'reaches out to grab the falling object'",
+          "dialogue_text": "The exact dialogue line for this panel (leave empty if no dialogue)",
+          "dialogue_tone": "Emotional tone of the dialogue: angry, sad, joyful, fearful, determined, sarcastic, desperate, calm, nervous, cold, warm, curious, urgent. Leave empty if no dialogue.",
+          "is_thought": false,
+          "narration": "Narrator text for this panel (leave empty if no narration)",
+          "emotion": "Primary emotion of this panel: tension, sorrow, joy, fear, determination, surprise, anger, calm, hope, despair, wonder, dread",
+          "emotion_intensity": 0.7,
+          "is_key_panel": false,
+          "location": "WHERE this panel takes place (narrative location, not background description)",
+          "time_of_day": "morning/afternoon/evening/night",
+          "atmosphere": "Mood of the environment: tense, peaceful, oppressive, bright, gloomy, eerie, warm, cold"
+        }
+      ]
+    }
+  ]
+}
+
+=== RULES ===
+
+1. PANEL COUNT: Each page should have 3-6 panels. Vary panel count for rhythm — not every page needs the same number. The total number of panels across all pages should feel appropriate for the story's pacing.
+
+2. NARRATIVE PURPOSE: Every panel MUST have a clear, specific narrative_purpose. This is the MOST IMPORTANT field. Ask yourself: "What does the reader learn or feel from this panel?" The narrative_purpose should describe the narrative function, NOT the visual look. Good: "Reveal the antagonist's true motive through a tense confrontation." Bad: "Close-up shot of the antagonist's face."
+
+3. CHARACTER ACTIONS: Describe WHAT the character does in narrative terms. Good: "confronts the antagonist about the betrayal." Bad: "standing with arms crossed, angry expression." The downstream agent will figure out the visual pose.
+
+4. DIALOGUE: Assign each dialogue line to a specific panel. One panel = one key dialogue beat. If a conversation needs multiple lines, spread them across consecutive panels for natural pacing. dialogue_tone must be specific — never use "neutral" unless truly neutral.
+
+5. EMOTIONAL ARC: emotion_intensity should flow naturally across panels. Build tension gradually, peak at key moments, and allow release. Not every panel needs high intensity — quiet moments create contrast.
+
+6. PAGE RHYTHM: Each page should have one is_key_panel (focal panel). This is the most important narrative beat on the page — often the climax of the page's mini-arc. Vary the position of the key panel across pages.
+
+7. CHARACTER USAGE: Reference characters by their char_id (char_000, char_001, etc.) from the character designs provided. Panels with no character (character_id="") are for establishing shots, transitions, and atmosphere.
+
+8. LOCATION/ATMOSPHERE: Provide narrative context for each panel's setting. These help the downstream agent understand WHERE the story is happening, not HOW to draw it.
+
+9. LANGUAGE: Write in the language specified in the user prompt. For Chinese (zh), write all text fields in Chinese (narrative_purpose, character_action, dialogue_text, narration, location, atmosphere, etc.).
+
+10. Output ONLY the JSON object, no markdown, no extra text."""
 
 
 class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
-    """Script understanding agent."""
+    """Script agent — story + character designs → panel-level script."""
 
     name = "script_agent"
-    version = "0.2.0-api"
+    version = "1.0.0"
     rubric_id = "rubric_script_v1"
 
     async def run(self, inputs: ScriptInput, context: AgentContext) -> ScriptOutput:
-        if self.config.llm.is_available:
-            try:
-                return await self._run_api(inputs, context)
-            except ApiBackendError:
-                if not self.config.runtime.fallback_to_local:
-                    raise
-        return await self._run_local(inputs, context)
+        if not self.config.llm.is_available:
+            raise ApiBackendError(
+                "LLM API is not configured — ScriptAgent requires a working LLM "
+                "to generate panel-level scripts."
+            )
+        return await self._run_api(inputs, context)
 
     async def _run_api(self, inputs: ScriptInput, context: AgentContext) -> ScriptOutput:
         from pydantic import ValidationError
 
         client = OpenAICompatibleLLMClient(self.config.llm)
 
-        system_prompt = (
-            "You are a professional comic script writer for ComicWeaver, a SINGLE-CHARACTER-PER-PANEL "
-            "black-and-white manga system. Every scene features EXACTLY ONE character. Your JSON "
-            "output will be REJECTED if any scene contains more than 1 character in characters_present.\n\n"
-
-            "=== RULE #1 (MOST IMPORTANT — VIOLATION = REJECTION) ===\n"
-            'Every "characters_present" array MUST contain EXACTLY ONE character ID. '
-            "ONE and ONLY ONE. Never two. Never three. ONE.\n"
-            '  CORRECT: "characters_present": ["char_000"]\n'
-            '  CORRECT: "characters_present": ["char_001"]\n'
-            '  WRONG:   "characters_present": ["char_000", "char_001"]  <-- WILL BE REJECTED\n'
-            '  WRONG:   "characters_present": []                        <-- WILL BE REJECTED\n'
-            "If two characters interact, put them in SEPARATE scenes. "
-            "Dialogue/text can reference other characters even when only one is visible.\n\n"
-
-            "=== OTHER RULES ===\n"
-            "2. Return a single JSON object matching this EXACT structure:\n"
-            '{\n'
-            '  "title": "A compelling title for the comic",\n'
-            '  "summary": "2-3 sentence summary of the story",\n'
-            '  "genre": ["action", "mystery"],\n'
-            '  "characters": [\n'
-            '    {\n'
-            '      "char_id": "char_000",\n'
-            '      "name": "Character Name",\n'
-            '      "role": "protagonist",\n'
-            '      "appearance": "Start with gender (male/female), then describe hair '
-            '(length, style, texture — NOT color except black/white/grey for hair), '
-            'eyes (shape and color allowed), clothing (style, fit, layers, texture — '
-            'NOT color), build. Describe TEXTURE, SHAPE, PATTERN, STYLE, LENGTH, FIT — '
-            'NOT colors. Example: Male, short spiky hair, narrow sharp grey eyes, '
-            'loose hoodie with layered collar, slim athletic build.",\n'
-            '      "first_appearance_scene": 0\n'
-            '    }\n'
-            '  ],\n'
-            '  "scenes": [\n'
-            '    {\n'
-            '      "scene_id": "scene_000",\n'
-            '      "order": 0,\n'
-            '      "location": "Specific location name",\n'
-            '      "time_of_day": "morning/afternoon/evening/night",\n'
-            '      "atmosphere": "Mood (e.g., tense, peaceful)",\n'
-            '      "characters_present": ["char_000"],\n'
-            '      "actions": [{"actor": "char_000", "description": "Action description"}],\n'
-            '      "dialogues": [{"speaker": "char_000", "text": "Dialogue", "tone": "angry"}],\n'
-            '      "narration": null,\n'
-            '      "emotion_intensity": 0.5,\n'
-            '      "panel_hint": 2,\n'
-            '      "visual_hook": "The most visually striking moment in this scene",\n'
-            '      "shot_sequence_hint": "Suggested camera sequence (e.g., wide establishing -> medium close-up -> reaction close-up)"\n'
-            '    }\n'
-            '  ],\n'
-            '  "emotion_curve": [0.3, 0.5, 0.8, 0.4],\n'
-            '  "narrative_structure": {\n'
-            '    "setup_scenes": [0],\n'
-            '    "rising_scenes": [1],\n'
-            '    "climax_scenes": [2],\n'
-            '    "resolution_scenes": [3],\n'
-            '    "pacing": "varied"\n'
-            '  }\n'
-            '}\n\n'
-            "3. char_id format: char_000, char_001, char_002. "
-            "scene_id format: scene_000, scene_001, etc.\n"
-            "4. role must be: protagonist, antagonist, supporting, extra.\n"
-            "5. emotion_intensity: 0.0 (calm) to 1.0 (climax).\n"
-            "6. emotion_curve: ONE float per scene, in scene order.\n"
-            "7. narrative_structure: arrays contain scene INDICES (order field values).\n"
-            "8. Each scene: at least 1 action + 1 dialogue.\n"
-            "9. Title must be creative, never 'Untitled'.\n"
-            "10. dialogue tone must be specific: angry, sad, joyful, fearful, determined, sarcastic, "
-            "whispering, desperate, calm, nervous, cold, warm — NEVER just 'neutral' unless truly neutral.\n"
-            "11. visual_hook: describe the SINGLE most visually compelling moment/image in this scene. "
-            "Think like a cinematographer: what shot would be the poster image for this scene?\n"
-            "12. shot_sequence_hint: suggest how camera shots should flow across panels within this scene "
-            "(e.g., 'establishing wide -> two-shot -> close-up reaction -> detail insert').\n"
-            "13. Output ONLY the JSON object, no markdown, no extra text.\n\n"
-
-            "=== REMINDER: characters_present ===\n"
-            "I repeat Rule #1 because it is the most common cause of rejection:\n"
-            'characters_present = ["ONE_CHAR_ID"] — exactly 1 element, always.\n'
-            'Never ["char_000", "char_001"]. Never []. Never more than 1.\n'
-        )
-
-        target_pages = inputs.target_pages
-        target_scenes = max(4, target_pages * 2)
-
-        # v0.4: Use story context if available, otherwise fallback to raw_text
+        # Build story context
         story = inputs.story
         if story:
             story_context = _build_story_context(story)
         else:
-            story_context = (
-                f'Create a comic script based on this story idea:\n\n'
-                f'"{inputs.raw_text}"\n\n'
-            )
+            story_context = f'Create a comic script based on this idea:\n\n"{inputs.raw_text}"\n\n'
+
+        # Build character context (v1.0)
+        char_context = _build_character_context(inputs.character_db)
+
+        target_panels = inputs.target_pages * inputs.target_panels_per_page
 
         user_message = (
             f"{story_context}"
-            f"Parameters:\n"
-            f"- Target pages: {target_pages}\n"
-            f"- Target scenes: {target_scenes}\n"
+            f"{char_context}"
+            f"\n=== SCRIPT PARAMETERS ===\n"
+            f"- Target pages: {inputs.target_pages}\n"
+            f"- Target panels per page: {inputs.target_panels_per_page}\n"
+            f"- Total target panels: approximately {target_panels}\n"
             f"- Style: {inputs.style_hint or 'manga'}\n"
-            f"- Language: {inputs.language}\n"
-            f"- Character count: 2-3\n\n"
-            f"CRITICAL CONSTRAINT (your output will be REJECTED if violated):\n"
-            f"  Every scene MUST have EXACTLY ONE character in characters_present.\n"
-            f"  This is a single-character-per-panel system.\n"
-            f"  If a scene involves two characters meeting or interacting,\n"
-            f"  split them into SEPARATE SCENES — each scene shows only one of them.\n\n"
-            f"Create a complete story arc with clear setup, rising action, climax, and resolution."
+            f"- Language: {inputs.language}\n\n"
+            f"IMPORTANT:\n"
+            f"- Write ALL text fields in {'Chinese' if inputs.language == 'zh' else inputs.language}\n"
+            f"- Assign specific char_id values from the character designs above\n"
+            f"- Some panels may have no character (character_id='') for establishing/transition panels\n"
+            f"- Every panel MUST have a meaningful narrative_purpose\n"
+            f"- Vary emotion_intensity across panels for dramatic rhythm\n"
         )
 
-        payload = {"user_message": user_message}
-
-        # 尝试 LLM 调用，失败时回退到本地
         try:
             data = await asyncio.to_thread(
                 client.complete_json,
-                system_prompt,
-                payload,
+                _PANEL_SCRIPT_SYSTEM_PROMPT,
+                {"user_message": user_message},
             )
         except ApiBackendError:
-            # API 连接/响应错误 → 回退本地
-            if not self.config.runtime.fallback_to_local:
-                raise
-            return await self._run_local(inputs, context)
+            raise ApiBackendError(
+                "ScriptAgent LLM call failed — cannot generate panel script."
+            ) from None
 
-        # 尝试 Pydantic 验证，失败时重试一次或回退
         try:
             output = ScriptOutput.model_validate(data)
-        except ValidationError as ve:
-            # 可能是 LLM 返回了嵌套结构（如 {"script": {...}}）
+        except ValidationError:
             if len(data) == 1 and isinstance(list(data.values())[0], dict):
                 try:
                     output = ScriptOutput.model_validate(list(data.values())[0])
                 except ValidationError:
-                    if self.config.runtime.fallback_to_local:
-                        return await self._run_local(inputs, context)
                     raise ApiBackendError(
-                        f"LLM response validation failed after unwrap: {ve}"
-                    ) from ve
-            elif self.config.runtime.fallback_to_local:
-                return await self._run_local(inputs, context)
+                        "ScriptAgent received invalid JSON from LLM."
+                    )
             else:
                 raise ApiBackendError(
-                    f"LLM response validation failed: {ve}"
-                ) from ve
+                    "ScriptAgent received invalid JSON from LLM."
+                )
 
-        # 质量检查：如果标题为空/Untitled，补充处理
         title = output.title
         if not title or title.strip().lower() in ("untitled", "无题", ""):
-            title = _make_title(inputs.raw_text)
+            title = story.title if story else "Untitled"
             output = output.model_copy(update={"title": title})
+
+        total_panels = sum(len(p.panels) for p in output.pages)
 
         return output.model_copy(update={
             "meta": AgentOutputMeta(
@@ -218,197 +204,61 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
                 inputs_hash=self._inputs_hash(inputs),
                 retry_count=context.retry_count,
                 self_check_notes=[
-                    f"LLM API provider: {self.config.llm.provider}",
-                    f"Generated {len(output.scenes)} scenes, {len(output.characters)} characters",
+                    f"LLM: {self.config.llm.provider}",
+                    f"Output: {len(output.pages)} pages, {total_panels} panels",
+                    f"Characters in context: {len(inputs.character_db.characters) if inputs.character_db else 0}",
                 ],
             )
         })
 
-    async def _run_local(self, inputs: ScriptInput, context: AgentContext) -> ScriptOutput:
-        """根据用户输入（或已开发的故事）构造一个可信的虚假剧本。"""
-        await self._sleep_for_demo(0.3)
-
-        story = inputs.story
-        raw_text = inputs.raw_text
-
-        # 选取角色数量(2-3)
-        n_chars = 2 if inputs.creation_mode == CreationMode.SIMPLE else 3
-        characters = [
-            CharacterDraft(
-                char_id=f"char_{i:03d}",
-                name=name,
-                role=role,  # type: ignore[arg-type]
-                appearance=appearance,
-                first_appearance_scene=0 if i == 0 else i,
-            )
-            for i, (name, role, appearance) in enumerate(
-                _MOCK_CHARACTERS[:n_chars]
-            )
-        ]
-
-        # 构造场景
-        n_scenes = max(4, inputs.target_pages * 2)
-        scenes: list[Scene] = []
-        for i in range(n_scenes):
-            # 每个场景仅 1 个角色（黑白漫画单角色分镜系统）
-            present = [characters[i % len(characters)].char_id]
-
-            # v0.4: 生成 visual_hook 和 shot_sequence_hint
-            location = _MOCK_LOCATIONS[i % len(_MOCK_LOCATIONS)]
-            atmosphere = _MOCK_ATMOSPHERES[i % len(_MOCK_ATMOSPHERES)]
-            hook = _make_visual_hook(location, atmosphere, present[0])
-            shot_hint = _make_shot_sequence_hint(i, n_scenes)
-
-            # v0.4: 为 dialogue 生成有意义的 tone
-            tone = _tone_for_position(i, n_scenes)
-
-            scenes.append(
-                Scene(
-                    scene_id=f"scene_{i:03d}",
-                    order=i,
-                    location=location,
-                    time_of_day="夜晚" if i % 2 == 0 else "白天",
-                    atmosphere=atmosphere,
-                    characters_present=present,
-                    dialogues=[
-                        Dialogue(
-                            speaker=present[0],
-                            text=f"这是第{i + 1}场的开场对话。",
-                            tone=tone,
-                        ),
-                    ],
-                    emotion_intensity=_emotion_for_position(i, n_scenes),
-                    panel_hint=2 if i in (n_scenes // 2, n_scenes - 1) else 1,
-                    visual_hook=hook,
-                    shot_sequence_hint=shot_hint,
-                )
-            )
-
-        emotion_curve = [s.emotion_intensity for s in scenes]
-
-        # 叙事结构: 起承转合
-        quarter = max(1, n_scenes // 4)
-        structure = NarrativeStructure(
-            setup_scenes=list(range(0, quarter)),
-            rising_scenes=list(range(quarter, 2 * quarter)),
-            climax_scenes=list(range(2 * quarter, 3 * quarter)),
-            resolution_scenes=list(range(3 * quarter, n_scenes)),
-            pacing="varied",
-        )
-
-        title = _make_title(raw_text)
-        if story:
-            summary = story.author_note or (story.story_text[:200] if story.story_text else "") or f"基于「{raw_text[:30]}」改编的{n_scenes}场漫画故事。"
-        else:
-            summary = f"基于「{raw_text[:30]}」改编的{n_scenes}场漫画故事。"
-
-        return ScriptOutput(
-            title=title,
-            summary=summary,
-            genre=["剧情", inputs.style_hint or "原创"],
-            characters=characters,
-            scenes=scenes,
-            emotion_curve=emotion_curve,
-            narrative_structure=structure,
-            meta=AgentOutputMeta(
-                agent=self.name,
-                version=self.version,
-                inputs_hash=self._inputs_hash(inputs),
-                retry_count=context.retry_count,
-                self_check_notes=[
-                    f"生成{n_scenes}场景,{len(characters)}角色",
-                    "本地规则后端,可通过配置切换到 LLM API",
-                ],
-            ),
-        )
-
     async def astream(
         self, inputs: ScriptInput, context: AgentContext
     ) -> AsyncIterator[StreamEvent]:
-        """带流式事件的执行。"""
-        yield self._make_event(StreamEventType.LOG, "开始解析剧本...")
+        yield self._make_event(StreamEventType.LOG, "开始设计面板级剧本...")
         yield self._make_event(StreamEventType.PROGRESS, 0.1)
 
-        await self._sleep_for_demo(0.2)
-        yield self._make_event(StreamEventType.THINKING, "扩展主题为完整大纲...")
+        await self._sleep_for_demo(0.15)
+        char_count = len(inputs.character_db.characters) if inputs.character_db else 0
+        yield self._make_event(
+            StreamEventType.THINKING,
+            f"基于{char_count}个角色设计，规划{inputs.target_pages}页面板叙事..."
+        )
         yield self._make_event(StreamEventType.PROGRESS, 0.3)
 
-        await self._sleep_for_demo(0.2)
-        yield self._make_event(StreamEventType.THINKING, "拆分场景与分配情感强度...")
+        await self._sleep_for_demo(0.15)
+        yield self._make_event(StreamEventType.THINKING, "为每格分配叙事任务与对白...")
         yield self._make_event(StreamEventType.PROGRESS, 0.6)
 
-        await self._sleep_for_demo(0.2)
-        yield self._make_event(StreamEventType.THINKING, "提取角色与对话...")
+        await self._sleep_for_demo(0.15)
+        yield self._make_event(StreamEventType.THINKING, "设计情感曲线与页面节奏...")
         yield self._make_event(StreamEventType.PROGRESS, 0.85)
 
         output = await self.run(inputs, context)
+        total_panels = sum(len(p.panels) for p in output.pages)
         yield self._make_event(
             StreamEventType.PARTIAL_OUTPUT,
-            {"title": output.title, "scene_count": len(output.scenes)},
+            {
+                "title": output.title,
+                "pages": len(output.pages),
+                "total_panels": total_panels,
+            },
         )
         yield self._make_event(StreamEventType.PROGRESS, 1.0)
         yield self._make_event(StreamEventType.DONE, output.model_dump())
 
 
-def _make_title(raw: str) -> str:
-    cleaned = raw.strip().replace("\n", " ")
-    if not cleaned:
-        return "无题"
-    return cleaned[:12] + ("..." if len(cleaned) > 12 else "")
-
-
-def _emotion_for_position(i: int, total: int) -> float:
-    """钟形情感曲线: 起→承→转(高潮)→合。"""
-    if total <= 1:
-        return 0.5
-    progress = i / (total - 1)
-    if progress < 0.25:
-        return 0.3 + progress * 0.4
-    if progress < 0.5:
-        return 0.4 + progress * 0.4
-    if progress < 0.75:
-        return 0.7 + (progress - 0.5) * 1.2  # 高潮
-    return 0.4 + random.uniform(-0.1, 0.1)
-
-
-def _make_visual_hook(location: str, atmosphere: str, char_id: str) -> str:
-    """为本地 mock 场景生成视觉焦点描述。"""
-    hooks = [
-        f"角色{char_id}站在{location}的中央，{atmosphere}的氛围笼罩四周",
-        f"特写镜头：角色{char_id}的面部表情展现出{atmosphere}的情绪",
-        f"角色{char_id}在{location}中的剪影，背景是{atmosphere}的光影",
-        f"动态镜头：角色{char_id}的关键动作瞬间定格",
-    ]
-    return random.choice(hooks)
-
-
-def _make_shot_sequence_hint(i: int, total: int) -> str:
-    """为本地 mock 场景生成镜头序列建议。"""
-    progress = i / max(total - 1, 1)
-    if progress < 0.25:
-        return "远景建立 → 中景介绍角色"
-    elif progress < 0.5:
-        return "中景动作 → 特写情感反应"
-    elif progress < 0.75:
-        return "中景紧张对峙 → 特写关键细节 → 极端特写表情"
-    else:
-        return "中景 → 远景收尾"
-
+# ---------------------------------------------------------------------------
+# Helpers (shared with _build_story_context from v0.2)
+# ---------------------------------------------------------------------------
 
 def _build_story_context(story) -> str:
-    """Build story context for ScriptAgent LLM prompt from StoryOutput (v0.2).
-
-    Supports both v0.2 fields (story_text, author_note, tone, setting, characters)
-    and legacy v0.1 fields (summary, premise, theme, act_structure, character_arcs).
-    """
-    # v0.2 fields
+    """Build story context for ScriptAgent LLM prompt from StoryOutput."""
     story_text = getattr(story, "story_text", "") or ""
     author_note = getattr(story, "author_note", "") or ""
     tone = getattr(story, "tone", "") or ""
     setting = getattr(story, "setting", "") or ""
     characters = getattr(story, "characters", []) or []
 
-    # If v0.2 fields are populated, use them
     if story_text:
         char_lines = "\n".join(
             f"  - {c.get('name', '?')} ({c.get('role', '?')}): {c.get('brief_description', '')}"
@@ -422,57 +272,21 @@ def _build_story_context(story) -> str:
             f"Genre: {', '.join(story.genre)}\n"
             f"Setting: {setting}\n"
             f"Core Conflict: {story.core_conflict}\n"
-            f"Characters:\n{char_lines}\n"
+            f"Story Characters (informational — use character designs below for visual details):\n{char_lines}\n"
             f"\n=== FULL STORY TEXT ===\n"
             f"{story_text}\n"
-            f"\n=== YOUR TASK ===\n"
-            f"Adapt the above story into a comic script. The story text contains the full "
-            f"narrative arc — now translate it into visual comic language. "
-            f"Choose the most visually powerful moments for each scene. "
-            f"Design dialogue that reveals character and advances the plot. "
-            f"Think about what the READER SEES in each panel.\n"
         )
 
-    # Legacy v0.1 fields (backward compatibility)
+    # Legacy v0.1 fallback
     summary = getattr(story, "summary", "") or ""
     premise = getattr(story, "premise", "") or ""
-    theme = getattr(story, "theme", "") or ""
-    act_structure = getattr(story, "act_structure", "") or ""
-    character_arcs = getattr(story, "character_arcs", []) or []
-    emotional_throughline = getattr(story, "emotional_throughline", "") or ""
-
     if summary or premise:
         return (
-            f"=== DEVELOPED STORY (legacy format) ===\n"
+            f"=== DEVELOPED STORY (legacy) ===\n"
             f"Title: {story.title}\n"
             f"Premise: {premise}\n"
-            f"Theme: {theme}\n"
-            f"Genre: {', '.join(story.genre)}\n"
             f"Summary: {summary}\n"
-            f"Core Conflict: {story.core_conflict}\n"
-            f"Act Structure: {act_structure}\n"
-            f"Emotional Throughline: {emotional_throughline}\n"
-            f"Character Arcs: {character_arcs}\n"
-            f"\n=== YOUR TASK ===\n"
-            f"Adapt the above story into a comic script. The story gives you the full "
-            f"narrative arc — now translate it into visual comic language. "
-            f"Choose the most visually powerful moments for each scene. "
-            f"Design dialogue that reveals character and advances the plot. "
-            f"Think about what the READER SEES in each panel.\n"
+            f"Genre: {', '.join(story.genre)}\n"
         )
 
-    # No story content available
     return ""
-
-
-def _tone_for_position(i: int, total: int) -> str:
-    """根据叙事位置生成对话情感语气。"""
-    progress = i / max(total - 1, 1)
-    if progress < 0.25:
-        return random.choice(["calm", "curious", "determined"])
-    elif progress < 0.5:
-        return random.choice(["tense", "worried", "urgent"])
-    elif progress < 0.75:
-        return random.choice(["desperate", "angry", "fearful"])
-    else:
-        return random.choice(["relieved", "sorrowful", "calm"])

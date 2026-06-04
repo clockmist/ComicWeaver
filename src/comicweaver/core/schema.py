@@ -142,6 +142,7 @@ class Dialogue(BaseModel):
 
 
 class Scene(BaseModel):
+    """[DEPRECATED v1.0] 保留用于 StoryboardAgent 过渡期，将被 PanelTask 替代。"""
     scene_id: str
     order: int
     location: str = ""
@@ -153,9 +154,8 @@ class Scene(BaseModel):
     narration: str | None = None
     emotion_intensity: float = 0.5
     panel_hint: int = 1
-    # v0.4: 视觉化提示 — 帮助下游 Agent 理解该场景的视觉重点
-    visual_hook: str = ""           # 该场景最具视觉冲击力的瞬间描述
-    shot_sequence_hint: str = ""    # 建议的镜头序列 (如 "远景建立 → 中景对话 → 特写反应")
+    visual_hook: str = ""
+    shot_sequence_hint: str = ""
 
 
 class NarrativeStructure(BaseModel):
@@ -164,6 +164,48 @@ class NarrativeStructure(BaseModel):
     climax_scenes: list[int] = Field(default_factory=list)
     resolution_scenes: list[int] = Field(default_factory=list)
     pacing: Literal["slow", "medium", "fast", "varied"] = "medium"
+
+
+# ===========================================================================
+# 面板级剧本模型 (v1.0)
+# ===========================================================================
+
+class PanelTask(BaseModel):
+    """单格面板的叙事任务 — ScriptAgent v1.0 的核心输出单元。
+
+    定义这一格需要完成的叙事功能，不涉及视觉/镜头设计。
+    """
+    panel_id: str = ""                    # "page_001_p01"
+    page_number: int = 1
+    order_in_page: int = 1
+
+    # 叙事功能（自由文本）
+    narrative_purpose: str = ""           # "建立场景：雨夜的城市街道"
+
+    # 谁、做什么、说什么
+    character_id: str = ""                # 空 = 纯场景/转场格，无角色登场
+    character_action: str = ""            # 角色在做什么（叙事动作，非镜头描述）
+    dialogue_text: str = ""               # 这一格的对白
+    dialogue_tone: str = ""               # 对白情感语气
+    is_thought: bool = False              # 内心独白
+    narration: str = ""                   # 旁白文字
+
+    # 情感与节奏
+    emotion: str = ""                     # tension / sorrow / joy / fear / determination / ...
+    emotion_intensity: float = 0.5        # 0.0 ~ 1.0
+    is_key_panel: bool = False            # 本页焦点格
+
+    # 场景上下文（叙事层面，非视觉层面）
+    location: str = ""                    # 发生在哪
+    time_of_day: str = ""                 # 时间段
+    atmosphere: str = ""                  # 场景氛围
+
+
+class ScriptPage(BaseModel):
+    """一页漫画的面板列表。"""
+    page_number: int
+    panels: list[PanelTask] = Field(default_factory=list)
+    page_note: str = ""                   # 页面级叙事说明
 
 
 # ===========================================================================
@@ -199,9 +241,11 @@ class StoryInput(BaseModel):
 
 
 class ScriptInput(BaseModel):
+    """ScriptAgent v1.0 输入：故事 + 角色设定 → 面板级剧本。"""
     creation_mode: CreationMode = CreationMode.SIMPLE
     raw_text: str = ""                                          # 兼容旧路径
-    story: StoryOutput | None = None                            # v0.4: 从故事出发
+    story: StoryOutput | None = None                            # 故事上下文
+    character_db: "CharacterDB | None" = None                   # v1.0: 角色设定
     target_pages: int = 4
     target_panels_per_page: int = 4
     style_hint: str | None = None
@@ -210,16 +254,19 @@ class ScriptInput(BaseModel):
 
 
 class ScriptOutput(BaseModel):
+    """ScriptAgent v1.0 输出：按页组织的面板级叙事任务。"""
     title: str = "Untitled"
     summary: str = ""
     genre: list[str] = Field(default_factory=list)
+    pages: list[ScriptPage] = Field(default_factory=list)       # v1.0: 替代 scenes
+    meta: AgentOutputMeta = Field(default_factory=lambda: AgentOutputMeta(
+        agent="script_agent", version="1.0.0"
+    ))
+    # [DEPRECATED v0.x] 以下字段保留向后兼容，新代码不应使用:
     characters: list[CharacterDraft] = Field(default_factory=list)
     scenes: list[Scene] = Field(default_factory=list)
     emotion_curve: list[float] = Field(default_factory=list)
     narrative_structure: NarrativeStructure = Field(default_factory=NarrativeStructure)
-    meta: AgentOutputMeta = Field(default_factory=lambda: AgentOutputMeta(
-        agent="script_agent", version="0.1.0"
-    ))
 
 
 # ===========================================================================

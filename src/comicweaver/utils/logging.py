@@ -244,24 +244,23 @@ def log_workflow_event(event: str, detail: str = "") -> DevLogEntry:
 
 
 def summarize_script_output(output: dict) -> dict:
-    """从 ScriptOutput 构建可读摘要。"""
+    """从 ScriptOutput 构建可读摘要（v1.0 pages 格式）。"""
+    pages = output.get("pages", [])
+    all_panels = []
+    for page in pages:
+        all_panels.extend(page.get("panels", []))
     return {
         "title": output.get("title", "Untitled"),
         "summary": (output.get("summary", "") or "")[:200],
         "genre": output.get("genre", []),
-        "scene_count": len(output.get("scenes", [])),
+        "page_count": len(pages),
+        "panel_count": len(all_panels),
         "character_count": len(output.get("characters", [])),
-        "emotion_curve_length": len(output.get("emotion_curve", [])),
-        "narrative_structure": {
-            k: len(v) for k, v in
-            (output.get("narrative_structure") or {}).items()
-            if isinstance(v, list)
-        },
-        "scene_locations": list({
-            s.get("location", "?")
-            for s in output.get("scenes", [])
-            if s.get("location")
-        }),
+        "panel_locations": list({
+            p.get("location", "?")
+            for p in all_panels
+            if p.get("location")
+        })[:10],
         "character_names": [
             c.get("name") for c in output.get("characters", [])
         ],
