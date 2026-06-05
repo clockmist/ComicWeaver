@@ -133,16 +133,25 @@ def render_checkpoint(pending: dict | None) -> str:
     """
 
 
-def render_script_summary(script: dict) -> str:
-    """渲染剧本摘要卡片。"""
+def render_script_summary(script: dict, story: dict | None = None) -> str:
+    """渲染剧本摘要卡片（v1.0：pages 格式 + StoryOutput 角色）。"""
     if not script:
         return '<div style="color:#64748b;padding:12px;">尚未生成剧本</div>'
 
     title = html.escape(script.get("title", "Untitled"))
     summary = html.escape(script.get("summary", ""))
-    chars = script.get("characters", [])
-    scenes = script.get("scenes", [])
     genres = script.get("genre", [])
+
+    # v1.0: 角色来自 StoryOutput.characters，script.characters 已弃用
+    story_chars = story.get("characters", []) if story else []
+    legacy_chars = script.get("characters", [])
+    chars = story_chars if story_chars else legacy_chars
+
+    # v1.0: 页面/面板来自 pages，scenes 已弃用
+    pages = script.get("pages", [])
+    legacy_scenes = script.get("scenes", [])
+    total_panels = sum(len(p.get("panels", [])) for p in pages)
+    scene_count = len(pages) if pages else len(legacy_scenes)
 
     char_html = "".join(
         f'<span class="cw-badge" style="margin-right:6px;">'
@@ -162,9 +171,9 @@ def render_script_summary(script: dict) -> str:
         <div style="font-size:13px;margin-bottom:6px;"><b>角色:</b></div>
         <div style="margin-bottom:12px;">{char_html}</div>
         <div style="display:flex;gap:24px;font-size:13px;color:#475569;">
-            <div><b>{len(scenes)}</b> 场景</div>
+            <div><b>{scene_count}</b> 页</div>
+            <div><b>{total_panels}</b> 分格</div>
             <div><b>{len(chars)}</b> 角色</div>
-            <div><b>{len(script.get('emotion_curve', []))}</b> 情感节点</div>
         </div>
     </div>
     """
@@ -1519,7 +1528,7 @@ def render_phase_text_content(state: dict | None, agent_outputs: dict[str, list[
     # 剧本阶段完成 → 显示完整剧本
     script = state.get("structured_script", {})
     if script:
-        parts.append(_render_detailed_script(script, char_id_to_name))
+        parts.append(_render_detailed_script(script, char_id_to_name, story))
 
     # 角色阶段完成 → 显示完整角色特征
     if character_db:
@@ -1630,84 +1639,149 @@ def _render_story_outline(story: dict) -> str:
 
 
 
-def _render_detailed_script(script: dict, char_map: dict[str, str]) -> str:
-    """渲染完整剧本：每个场景的叙述、对话、动作。"""
+def _render_detailed_script(script: dict, char_map: dict[str, str], story: dict | None = None) -> str:
+    """渲染完整剧本（v1.0：pages/panels 格式 + StoryOutput 角色）。"""
     title = html.escape(script.get("title", "未命名"))
     summary = html.escape((script.get("summary", "") or ""))
     genres = script.get("genre", [])
-    scenes = script.get("scenes", [])
-    characters = script.get("characters", [])
+
+    # v1.0: 角色来自 StoryOutput；旧 script.characters 已弃用
+    story_chars = story.get("characters", []) if story else []
+    legacy_chars = script.get("characters", [])
+    characters = story_chars if story_chars else legacy_chars
+
+    # v1.0: 页/面板；旧 scenes 已弃用
+    pages = script.get("pages", [])
+    legacy_scenes = script.get("scenes", [])
 
     genre_tags = " ".join(
         f'<span class="cw-badge">{html.escape(str(g))}</span>' for g in genres
     )
 
-    # 角色列表
+    # 角色列表（来自 StoryOutput: name, role, brief_description）
     char_list = ""
     for c in characters:
         name = html.escape(c.get("name", "?"))
         role = html.escape(c.get("role", "?"))
-        appearance = html.escape((c.get("appearance") or "")[:60])
-        personality = html.escape((c.get("personality") or "")[:60])
+        desc = html.escape((c.get("brief_description") or "")[:120])
         char_list += (
             f'<div class="cw-phase-text-scene">'
             f'<b>{name}</b> <span class="cw-badge">{role}</span>'
-            + (f'<br><span style="color:#64748b;">外貌: {appearance}</span>' if appearance else "")
-            + (f'<br><span style="color:#64748b;">性格: {personality}</span>' if personality else "")
+            + (f'<br><span style="color:#64748b;">{desc}</span>' if desc else "")
             + f'</div>'
         )
 
-    # 场景详情
-    scene_items = ""
-    for s in scenes:
-        idx = s.get("order", s.get("scene_index", "?"))
-        loc = html.escape(s.get("location", "?"))
-        time_of_day = html.escape(s.get("time_of_day", ""))
-        atmosphere = html.escape(s.get("atmosphere", ""))
-        narration = html.escape((s.get("narration") or "")[:150])
-        emotion = s.get("emotion_intensity", 0)
+    # --- v1.0 路径：渲染 pages → panels ---
+    panel_items = ""
+    if pages:
+        total_panels = sum(len(p.get("panels", [])) for p in pages)
+        for page in pages:
+            page_num = page.get("page_number", "?")
+            page_note = html.escape((page.get("page_note") or "")[:200])
+            panels = page.get("panels", [])
 
-        # 角色
-        chars_in_scene = s.get("characters_present", [])
-        char_display = ", ".join(
-            html.escape(_resolve_char_name(cid, char_map))
-            for cid in chars_in_scene
-        ) if chars_in_scene else "无"
+            page_panels_html = ""
+            for panel in panels:
+                pid = html.escape(panel.get("panel_id", "?"))
+                order = panel.get("order_in_page", "?")
+                purpose = html.escape(panel.get("narrative_purpose", "")[:200])
+                char_name = html.escape(_resolve_char_name(panel.get("character_id", ""), char_map))
+                action = html.escape((panel.get("character_action") or "")[:120])
+                dialogue = html.escape((panel.get("dialogue_text") or "")[:150])
+                tone = html.escape(panel.get("dialogue_tone", ""))
+                is_thought = panel.get("is_thought", False)
+                narration = html.escape((panel.get("narration") or "")[:150])
+                emotion = panel.get("emotion", "")
+                emotion_intensity = panel.get("emotion_intensity", 0.5)
+                is_key = panel.get("is_key_panel", False)
+                location = html.escape(panel.get("location", ""))
+                time_of_day = html.escape(panel.get("time_of_day", ""))
+                atmosphere = html.escape(panel.get("atmosphere", ""))
 
-        # 动作
-        actions = s.get("actions", [])
-        action_items = ""
-        for a in actions:
-            actor = html.escape(_resolve_char_name(a.get("actor", "?"), char_map))
-            desc = html.escape(a.get("description", "")[:80])
-            action_items += f'<div style="margin-left:8px;">🎬 <b>{actor}</b>: {desc}</div>'
+                bubble_icon = "💭" if is_thought else "💬"
+                tone_badge = f' <span class="cw-badge">{tone}</span>' if tone else ""
+                key_badge = ' <span class="cw-badge" style="background:#fef3c7;color:#92400e;">关键格</span>' if is_key else ""
 
-        # 对话
-        dialogues = s.get("dialogues", [])
-        dialogue_items = ""
-        for d in dialogues:
-            speaker = html.escape(_resolve_char_name(d.get("speaker", "?"), char_map))
-            text = html.escape(d.get("text", "")[:120])
-            tone = html.escape(d.get("tone", ""))
-            is_thought = d.get("is_thought", False)
-            bubble_icon = "💭" if is_thought else "💬"
-            tone_badge = f' <span class="cw-badge">{tone}</span>' if tone else ""
-            dialogue_items += (
-                f'<div style="margin-left:8px;">{bubble_icon} <b>{speaker}</b>{tone_badge}: {text}</div>'
-            )
+                page_panels_html += f"""
+                <div class="cw-phase-text-scene" style="margin-bottom:6px;">
+                    <div style="font-weight:600;margin-bottom:2px;">
+                        格 {order} {key_badge}
+                        {f'<span style="float:right;font-size:10px;color:#94a3b8;">{emotion} {emotion_intensity:.1f}</span>' if emotion else ''}
+                    </div>
+                    {f'<div style="color:#3b82f6;font-size:12px;margin-bottom:2px;">🎯 {purpose}</div>' if purpose else ''}
+                    {f'<div style="font-size:11px;color:#64748b;">📍 {location}{" · " + time_of_day if time_of_day else ""}{" · " + atmosphere if atmosphere else ""}</div>' if (location or time_of_day or atmosphere) else ''}
+                    {f'<div style="color:#64748b;font-style:italic;">📢 {narration}</div>' if narration else ''}
+                    {f'<div>🎬 <b>{char_name}</b>: {action}</div>' if (char_name or action) else ''}
+                    {f'<div>{bubble_icon} <b>{char_name}</b>{tone_badge}: {dialogue}</div>' if dialogue else ''}
+                </div>
+                """
 
-        scene_items += f"""
-        <div class="cw-phase-text-scene">
-            <b>场景 {idx}</b> · {loc}
-            {f' · {time_of_day}' if time_of_day else ''}
-            {f' · {atmosphere}' if atmosphere else ''}
-            <span style="float:right;font-size:10px;color:#94a3b8;">情绪 {emotion:.2f}</span>
-            {f'<div style="color:#64748b;font-style:italic;">📢 {narration}</div>' if narration else ''}
-            <div style="font-size:11px;color:#64748b;">角色: {char_display}</div>
-            {action_items}
-            {dialogue_items}
-        </div>
-        """
+            page_panels_html = page_panels_html or '<div style="color:#94a3b8;font-size:12px;">（无面板）</div>'
+
+            panel_items += f"""
+            <details style="margin-top:4px;" open>
+                <summary style="cursor:pointer;color:#6366f1;font-size:13px;font-weight:600;">
+                    📄 第 {page_num} 页 ({len(panels)} 格)
+                    {f'<span style="color:#64748b;font-weight:400;font-size:12px;">— {page_note}</span>' if page_note else ''}
+                </summary>
+                <div style="margin-left:12px;border-left:2px solid #e0e7ff;padding-left:12px;margin-top:6px;">
+                    {page_panels_html}
+                </div>
+            </details>
+            """
+    else:
+        # --- 旧格式兼容路径 ---
+        for s in legacy_scenes:
+            idx = s.get("order", s.get("scene_index", "?"))
+            loc = html.escape(s.get("location", "?"))
+            time_of_day = html.escape(s.get("time_of_day", ""))
+            atmosphere = html.escape(s.get("atmosphere", ""))
+            narration = html.escape((s.get("narration") or "")[:150])
+            emotion = s.get("emotion_intensity", 0)
+
+            chars_in_scene = s.get("characters_present", [])
+            char_display = ", ".join(
+                html.escape(_resolve_char_name(cid, char_map))
+                for cid in chars_in_scene
+            ) if chars_in_scene else "无"
+
+            actions = s.get("actions", [])
+            action_items = ""
+            for a in actions:
+                actor = html.escape(_resolve_char_name(a.get("actor", "?"), char_map))
+                desc = html.escape(a.get("description", "")[:80])
+                action_items += f'<div style="margin-left:8px;">🎬 <b>{actor}</b>: {desc}</div>'
+
+            dialogues = s.get("dialogues", [])
+            dialogue_items = ""
+            for d in dialogues:
+                speaker = html.escape(_resolve_char_name(d.get("speaker", "?"), char_map))
+                text = html.escape(d.get("text", "")[:120])
+                tone = html.escape(d.get("tone", ""))
+                is_thought = d.get("is_thought", False)
+                bubble_icon = "💭" if is_thought else "💬"
+                tone_badge = f' <span class="cw-badge">{tone}</span>' if tone else ""
+                dialogue_items += (
+                    f'<div style="margin-left:8px;">{bubble_icon} <b>{speaker}</b>{tone_badge}: {text}</div>'
+                )
+
+            panel_items += f"""
+            <div class="cw-phase-text-scene">
+                <b>场景 {idx}</b> · {loc}
+                {f' · {time_of_day}' if time_of_day else ''}
+                {f' · {atmosphere}' if atmosphere else ''}
+                <span style="float:right;font-size:10px;color:#94a3b8;">情绪 {emotion:.2f}</span>
+                {f'<div style="color:#64748b;font-style:italic;">📢 {narration}</div>' if narration else ''}
+                <div style="font-size:11px;color:#64748b;">角色: {char_display}</div>
+                {action_items}
+                {dialogue_items}
+            </div>
+            """
+
+    source_format = "pages" if pages else "scenes(旧格式)"
+
+    page_count = len(pages) if pages else len(legacy_scenes)
+    total_panels = sum(len(p.get("panels", [])) for p in pages) if pages else len(legacy_scenes)
 
     return f"""
     <div class="cw-phase-text-panel">
@@ -1716,7 +1790,8 @@ def _render_detailed_script(script: dict, char_map: dict[str, str]) -> str:
         <div class="cw-phase-text-item" style="margin-bottom:6px;">{summary}</div>
         <div class="cw-phase-text-item">{genre_tags}</div>
         <div class="cw-phase-text-item" style="margin-top:4px;">
-            <span class="key">场景数:</span> <span class="val">{len(scenes)}</span>
+            <span class="key">页数:</span> <span class="val">{page_count}</span>
+            &nbsp;&nbsp;<span class="key">分格:</span> <span class="val">{total_panels}</span>
             &nbsp;&nbsp;<span class="key">角色数:</span> <span class="val">{len(characters)}</span>
         </div>
         <details style="margin-top:6px;">
@@ -1727,9 +1802,9 @@ def _render_detailed_script(script: dict, char_map: dict[str, str]) -> str:
         </details>
         <details style="margin-top:4px;" open>
             <summary style="cursor:pointer;color:#3b82f6;font-size:13px;font-weight:600;">
-                🎬 场景详情 ({len(scenes)}场)
+                🎬 分页面板详情 ({page_count}页 · {total_panels}格)
             </summary>
-            {scene_items}
+            {panel_items}
         </details>
         </div>
     </div>

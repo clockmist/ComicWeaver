@@ -246,7 +246,13 @@ async def _consume_workflow(session: Session) -> None:
                                 session.state["narrative_structure"] = content.get("narrative_structure", {})
                             elif agent_name == "script_agent":
                                 session.state["structured_script"] = content
-                                session.state["emotion_curve"] = content.get("emotion_curve", [])
+                                # v1.0: 从 pages 提取 emotion_curve（旧字段已弃用）
+                                curve: list[float] = []
+                                for p in content.get("pages", []):
+                                    for panel in p.get("panels", []):
+                                        if panel.get("emotion_intensity") is not None:
+                                            curve.append(float(panel["emotion_intensity"]))
+                                session.state["emotion_curve"] = curve or content.get("emotion_curve", [])
                             elif agent_name == "character_agent":
                                 session.state["character_db"] = content.get("character_db") or {}
                             elif agent_name == "storyboard_agent":
@@ -672,11 +678,13 @@ def load_results(page_idx: int = 0, show_bubbles: bool = False) -> tuple[str, st
         empty = '<div style="color:#64748b;padding:12px;">请先创建项目并运行工作流</div>'
         return empty, empty, empty, empty, empty, empty, []
 
-    script = SESSION.state.get("structured_script", {}) or {}
-    curve = SESSION.state.get("emotion_curve", []) or []
-    plan = SESSION.state.get("storyboard_plan", []) or []
-    reviews = SESSION.state.get("review_results", []) or []
-    final_pages = SESSION.state.get("final_pages", []) or []
+    state = SESSION.state
+    script = state.get("structured_script", {}) or {}
+    story = state.get("developed_story", {}) or {}
+    curve = state.get("emotion_curve", []) or []
+    plan = state.get("storyboard_plan", []) or []
+    reviews = state.get("review_results", []) or []
+    final_pages = state.get("final_pages", []) or []
 
     # 页面阅读器
     page_reader_html = render_page_reader(final_pages, page_idx, show_bubbles)
@@ -690,7 +698,7 @@ def load_results(page_idx: int = 0, show_bubbles: bool = False) -> tuple[str, st
             page_gallery.append(path)
 
     return (
-        render_script_summary(script),
+        render_script_summary(script, story),
         render_emotion_curve(curve),
         render_storyboard_preview(plan),
         render_review_history(reviews),
@@ -905,6 +913,7 @@ def load_all_results(page_idx: int = 0, show_bubbles: bool = False) -> tuple:
 
     state = SESSION.state
     script = state.get("structured_script", {}) or {}
+    story = state.get("developed_story", {}) or {}
     curve = state.get("emotion_curve", []) or []
     plan = state.get("storyboard_plan", []) or []
     reviews = state.get("review_results", []) or []
@@ -912,7 +921,7 @@ def load_all_results(page_idx: int = 0, show_bubbles: bool = False) -> tuple:
     character_db = state.get("character_db", {}) or {}
 
     return (
-        render_script_summary(script),
+        render_script_summary(script, story),
         render_emotion_curve(curve),
         render_storyboard_preview(plan),
         render_review_history(reviews),

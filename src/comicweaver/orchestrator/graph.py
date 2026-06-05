@@ -275,6 +275,8 @@ class ComicWorkflow:
                     writer(evt)
                     if evt.type == StreamEventType.DONE and evt.content:
                         state["structured_script"] = evt.content
+                        # v1.0: 从 pages 提取 emotion_curve（替代旧 script 的 emotion_curve）
+                        state["emotion_curve"] = _extract_emotion_curve(evt.content)
                         writer(log_agent_output("script_agent",
                             summarize_script_output(evt.content)))
             except Exception as exc:
@@ -897,3 +899,18 @@ def _panel_tasks_to_scenes(raw_pages: list[dict]) -> list[Scene]:
                 panel_hint=1,
             ))
     return scenes
+
+
+def _extract_emotion_curve(script_content: dict) -> list[float]:
+    """v1.0: 从 pages 的面板中提取 emotion_intensity 序列。
+
+    替代旧 script 输出中的 emotion_curve 字段。
+    """
+    pages = script_content.get("pages", [])
+    curve: list[float] = []
+    for page in pages:
+        for panel in page.get("panels", []):
+            intensity = panel.get("emotion_intensity")
+            if intensity is not None:
+                curve.append(float(intensity))
+    return curve

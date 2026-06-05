@@ -249,21 +249,30 @@ def summarize_script_output(output: dict) -> dict:
     all_panels = []
     for page in pages:
         all_panels.extend(page.get("panels", []))
+
+    # v1.0: 从面板中提取所有出现的角色 ID（去重）
+    char_ids_in_panels: set[str] = set()
+    for p in all_panels:
+        cid = p.get("character_id", "")
+        if cid:
+            char_ids_in_panels.add(cid)
+
     return {
         "title": output.get("title", "Untitled"),
         "summary": (output.get("summary", "") or "")[:200],
         "genre": output.get("genre", []),
         "page_count": len(pages),
         "panel_count": len(all_panels),
-        "character_count": len(output.get("characters", [])),
+        "character_count": max(
+            len(char_ids_in_panels),
+            len(output.get("characters", [])),   # 旧格式兼容
+        ),
         "panel_locations": list({
             p.get("location", "?")
             for p in all_panels
             if p.get("location")
         })[:10],
-        "character_names": [
-            c.get("name") for c in output.get("characters", [])
-        ],
+        "character_names": sorted(char_ids_in_panels),
     }
 
 
