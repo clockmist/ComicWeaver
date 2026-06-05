@@ -1905,15 +1905,10 @@ def _render_detailed_storyboard(storyboard: list[dict], char_map: dict[str, str]
             shot = html.escape(pn.get("shot_size", "?"))
             angle = html.escape(pn.get("camera_angle", "?"))
             shape = html.escape(pn.get("shape", "rectangle"))
-            action = html.escape((pn.get("primary_action") or "")[:100])
-            pose = html.escape((pn.get("pose_hint") or "")[:80])
-            expression = html.escape((pn.get("expression") or "")[:80])
-            setting = html.escape((pn.get("setting") or "")[:60])
             mood = html.escape(pn.get("mood", ""))
-            lighting = html.escape((pn.get("scene_lighting") or "")[:60])
-            weather = html.escape((pn.get("weather") or "")[:30])
-            time_of_day = html.escape((pn.get("time_of_day") or "")[:30])
             emotion = pn.get("emotion_intensity", 0)
+            prompt_pack = pn.get("prompt_pack", {})
+            prompt_text = html.escape((prompt_pack.get("positive_prompt") or pn.get("primary_action") or "")[:300])
 
             # 此面板中的角色
             chars_in_panel = pn.get("characters_in_panel", [])
@@ -1959,12 +1954,8 @@ def _render_detailed_storyboard(storyboard: list[dict], char_map: dict[str, str]
                     <span class="cw-badge" style="background:#e0e7ff;color:#3730a3;">{shape}</span>
                     {f'<span class="cw-badge" style="background:#fef3c7;color:#92400e;">{mood}</span>' if mood else ''}
                 </div>
-                {f'<div><span class="key">场景:</span> {setting}</div>' if setting else ''}
-                {f'<div><span class="key">光照:</span> {lighting}' + (f' · {weather}' if weather else '') + (f' · {time_of_day}' if time_of_day else '') + '</div>' if (lighting or weather or time_of_day) else ''}
                 <div><span class="key">角色:</span> {char_display}</div>
-                {f'<div><span class="key">动作:</span> {action}</div>' if action else ''}
-                {f'<div><span class="key">姿势:</span> {pose}</div>' if pose else ''}
-                {f'<div><span class="key">表情:</span> {expression}</div>' if expression else ''}
+                {f'<div style="margin-top:2px;"><span class="key">Prompt</span> <span style="font-size:10px;color:#64748b;word-break:break-all;">{prompt_text}</span></div>' if prompt_text else ''}
                 {f'<div style="margin-top:2px;">{dialogue_items}</div>' if dialogue_items else ''}
                 {f'<div style="margin-top:2px;">💭气泡: {bubble_items}</div>' if bubble_items else ''}
             </div>

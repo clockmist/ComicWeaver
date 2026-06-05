@@ -54,7 +54,7 @@ class ImageAgent(BaseAgent[ImageInput, ImageOutput]):
                 # v0.6: Validate against structured VisualTraits
                 vt = char_profile.visual_traits
                 if not vt.hair and not vt.eyes:
-                    self._emit(
+                    await self._emit(
                         StreamEventType.LOG,
                         f"Warning: VisualTraits empty for {char_id} — using core_tags only",
                     )
