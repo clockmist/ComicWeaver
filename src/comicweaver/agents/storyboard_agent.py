@@ -88,105 +88,69 @@ NEGATIVE_BY_SHOT: dict[str, str] = {
 
 _STORYBOARD_SYSTEM_PROMPT = """You are a prompt engineer for Animagine-XL-4.0 black-and-white manga.
 
-Translate a panel's narrative description into visual tags.
+For each panel, translate narrative description into visual tags.
 
 Output JSON:
 {
-  "filtered_char_tags": "character tags visible in this shot",
+  "filtered_char_tags": "character tags visible in this shot, or empty string if no character",
   "scene_description": "3-8 visual tags: pose, expression, setting, lighting",
   "shot_size": "extreme_long|long|full|medium|close|extreme_close",
   "camera_angle": "eye_level|high_angle|low_angle|dutch_angle"
 }
 
-=== HOW TO CHOOSE SHOT SIZE ===
-- Low emotion (<0.4): long or medium
-- Medium emotion (0.4-0.7): medium or full
-- High emotion (>0.7): close or extreme_close
-- Action/running: long or full
-- First panel of page: vary from previous shot_size
+=== CHARACTER DETECTION ===
+CRITICAL: Check if the panel has a character.
 
-=== TAG FILTERING ===
+- If character_id is EMPTY or character_action is EMPTY: 
+  - This is a BACKGROUND/ESTABLISHING panel with NO character.
+  - filtered_char_tags MUST be "" (empty string).
+  - scene_description should focus on environment, atmosphere, architecture.
+  - shot_size should be extreme_long or long.
+
+- If character_id exists and character_action exists:
+  - This panel HAS a character.
+  - Filter character tags based on shot_size (see below).
+  - scene_description should include pose and expression.
+
+=== TAG FILTERING (character panels only) ===
+You receive a COMPLETE tag list from the character designer. REMOVE only tags not visible in this shot. NEVER add new tags.
+
 - extreme_long: gender + solo + 1 silhouette tag
-- long: gender + solo + 2-3 silhouette tags
+- long: gender + solo + 2-3 silhouette tags  
 - full: all tags
 - medium: head + upper body clothing
-- close: head + eyes + face accessories only
-- extreme_close: eyes + mouth + eyebrows only
+- close: head + eyes + face accessories
+- extreme_close: eyes + mouth + eyebrows
 
-=== BLACKLIST (NEVER use these) ===
-serene, calm, curious, solemn, determined, peaceful, relaxed, focused
-morning light, sunlight, natural light, daylight, soft light
-no_xxx, classroom setting, reading diary, searching for
+NEVER invent tags like "round eyes" or "bright eyes". Use ONLY provided tags.
+
+=== SCENE_DESCRIPTION RULES ===
+- NO quality tags (masterpiece, etc.) — added automatically.
+- NO style tags (monochrome, etc.) — added automatically.
+- NO abstract mood words: serene, calm, curious, solemn, determined, oppressive atmosphere.
+- NO "morning light", "sunlight", "natural light", "soft light".
+- NO "no_xxx" tags.
+- Use concrete visual tags only.
+
+=== ACTION TAGS ===
+- At most 2 action tags per panel.
+- Pick the MOST IMPORTANT pose for this moment.
+- BAD: "jumping, aiming, firing" → GOOD: "jumping, aiming pistol"
+- BAD: "rolling, tossing, tripping" → GOOD: "rolling to side, arm extended"
 
 === EXAMPLES ===
 
-Input:
-narrative_purpose: "Student sitting at desk, calm morning"
-character_action: "sitting, looking through book"
-emotion: "calm"
-emotion_intensity: 0.3
-location: "classroom"
-time_of_day: "morning"
-previous_panel: "N/A"
+Example 1 — NO CHARACTER (establishing shot):
+Input: character_id="", character_action="", narrative_purpose="展现废铁城压抑的环境，灰黄烟尘笼罩街道，机械塔楼高耸，废弃车辆和管道堆积", emotion="tension", emotion_intensity=0.6, location="废铁城街道，机械塔楼下", time_of_day="evening"
+Output: {"filtered_char_tags":"","scene_description":"industrial ruins,smoke,tall towers,pipes,abandoned vehicles,harsh shadows,dim light","shot_size":"extreme_long","camera_angle":"eye_level"}
 
-Output:
-{
-  "filtered_char_tags": "1girl, solo, young_adult, short hair, ponytail, black hair, round eyes, blue eyes, casual clothing, slim",
-  "scene_description": "sitting, looking down, holding book, neutral expression, classroom desk, window light, soft shadows",
-  "shot_size": "medium",
-  "camera_angle": "eye_level"
-}
+Example 2 — CHARACTER MEDIUM SHOT:
+Input: character_id="char_000", character_action="leaning out from behind wrecked car, observing", narrative_purpose="男角色从掩体后探出观察敌情", emotion="tension", emotion_intensity=0.6, location="废铁城街道", time_of_day="evening", character_tags="1boy,solo,young_adult,short hair,spiky hair,black hair,sharp eyes,grey eyes,jacket,torn clothing,athletic"
+Output: {"filtered_char_tags":"1boy,solo,young_adult,short hair,spiky hair,black hair,sharp eyes,grey eyes,jacket,torn clothing,athletic","scene_description":"leaning forward,hand on car,looking ahead,furrowed brow,smoke,dim light","shot_size":"medium","camera_angle":"eye_level"}
 
-Input:
-narrative_purpose: "Searching for lost diary, growing anxiety"
-character_action: "searching through bookshelf"
-emotion: "tension"
-emotion_intensity: 0.6
-location: "classroom"
-time_of_day: "morning"
-previous_panel: "Student sitting at desk, calm"
-
-Output:
-{
-  "filtered_char_tags": "1girl, solo, young_adult, short hair, ponytail, black hair, round eyes, blue eyes, casual clothing, slim",
-  "scene_description": "leaning forward, hand on shelf, looking down, worried expression, furrowed brow, classroom bookshelf, window light",
-  "shot_size": "medium",
-  "camera_angle": "high_angle"
-}
-
-Input:
-narrative_purpose: "Shocking revelation from diary, emotional climax"
-character_action: "reading diary with disbelief"
-emotion: "surprise"
-emotion_intensity: 0.9
-location: "classroom"
-time_of_day: "morning"
-previous_panel: "Searching through bookshelf, tension"
-
-Output:
-{
-  "filtered_char_tags": "1girl, solo, short hair, ponytail, black hair, round eyes, blue eyes",
-  "scene_description": "hands holding paper, head down, wide eyes, parted lips, sweat drop, plain background, harsh shadows",
-  "shot_size": "close",
-  "camera_angle": "eye_level"
-}
-
-Input:
-narrative_purpose: "Determined resolution after reading"
-character_action: "looking up with resolve"
-emotion: "determination"
-emotion_intensity: 0.8
-location: "classroom"
-time_of_day: "morning"
-previous_panel: "Shocking revelation from diary"
-
-Output:
-{
-  "filtered_char_tags": "1girl, solo, short hair, ponytail, black hair, round eyes, blue eyes",
-  "scene_description": "looking up, head raised, narrowed eyes, tight jaw, plain background, rim lighting, dramatic shadows",
-  "shot_size": "close",
-  "camera_angle": "low_angle"
-}
+Example 3 — CHARACTER CLOSE-UP:
+Input: character_id="char_001", character_action="peering through scope, targeting", narrative_purpose="女角色瞄准敌人", emotion="tension", emotion_intensity=0.8, location="废铁城街道", time_of_day="evening", character_tags="1girl,solo,young_adult,long hair,straight hair,black hair,large eyes,green eyes,tactical vest,fitted shirt,cargo pants,slim"
+Output: {"filtered_char_tags":"1girl,solo,young_adult,long hair,straight hair,black hair,large eyes,green eyes","scene_description":"peering through scope,looking ahead,furrowed brows,parted lips,harsh shadows","shot_size":"close","camera_angle":"eye_level"}
 
 Output ONLY valid JSON. No markdown, no extra text."""
 
@@ -742,17 +706,16 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
 
 
         user_payload = {
-            "narrative_purpose": panel_task.get('narrative_purpose', ''),
-            "character_action": panel_task.get('character_action', ''),
-            "emotion": panel_task.get('emotion', ''),
-            "emotion_intensity": panel_task.get('emotion_intensity', 0.5),
-            "location": panel_task.get('location', ''),
-            "time_of_day": panel_task.get('time_of_day', ''),
-            "previous_panel_narrative": prev_narrative if prev_narrative else 'N/A (first panel)',
-            "character_tags": full_char_tags,
-            "character_gender": char_gender,
-            "panel_index": f"{global_idx + 1}/{total_panels}",
-        }
+    "character_id": panel_task.get('character_id', ''),  # 空字符串表示无角色
+    "character_action": panel_task.get('character_action', ''),
+    "narrative_purpose": panel_task.get('narrative_purpose', ''),
+    "emotion": panel_task.get('emotion', ''),
+    "emotion_intensity": panel_task.get('emotion_intensity', 0.5),
+    "location": panel_task.get('location', ''),
+    "time_of_day": panel_task.get('time_of_day', ''),
+    "character_tags": full_char_tags if char_name else "",  # 无角色时传空
+    "panel_index": f"{global_idx + 1}/{total_panels}",
+}
 
         data = await asyncio.to_thread(
             client.complete_json,

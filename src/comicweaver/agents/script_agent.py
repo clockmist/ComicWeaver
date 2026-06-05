@@ -1,16 +1,20 @@
-"""Script agent — v1.0 panel-level narrative tasks.
+"""Script agent — v2.1 sliding-window chunking for panelization.
 
-Transforms a developed story + character designs into a page-by-page,
-panel-by-panel script. Each panel gets a clear narrative purpose — WHAT
-this panel needs to communicate to the reader.
+Two-stage architecture:
+  Stage 1 (Pagination):  1 LLM call → page-level outlines with narrative arcs
+  Stage 2 (Panelization): Chunks of pages processed sequentially; pages within
+                          a chunk are handled in ONE LLM call for max coherence.
 
-Does NOT define visual/cinematography details (shot size, camera angle,
-pose hints). Those are left for the StoryboardAgent downstream.
+v1.0: single LLM call for all pages + panels
+v2.1: chunked — sequential chunks, single LLM call per chunk (Option A)
 """
 from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from typing import Any
+
+from pydantic import ValidationError
 
 from comicweaver.api import ApiBackendError, OpenAICompatibleLLMClient
 from comicweaver.core import (
@@ -18,12 +22,7 @@ from comicweaver.core import (
     AgentOutputMeta,
     BaseAgent,
     CharacterDB,
-    CharacterDraft,
-    CreationMode,
-    Dialogue,
-    NarrativeStructure,
     PanelTask,
-    Scene,
     ScriptInput,
     ScriptOutput,
     ScriptPage,
@@ -32,17 +31,472 @@ from comicweaver.core import (
 )
 
 
+# ============================================================================
+# CONFIG
+# ============================================================================
+DEFAULT_CHUNK_SIZE = 4  # 每块生成多少页的面板
+
+
+# ============================================================================
+# STAGE 1: Pagination System Prompt
+# ============================================================================
+
+_PAGINATION_SYSTEM_PROMPT = """You are a comic pagination expert. Divide a developed story into PAGE-LEVEL outlines.
+
+Each page outline must include:
+- narrative_arc: what story beats this page covers
+- emotional_shift: how emotions change (e.g., "curiosity → tension → shock")
+- key_moment: the single most important narrative beat
+- key_panel_hint: revelation / confrontation / quiet_moment / action_peak / emotional_climax / transition
+- involved_characters: list of char_ids
+- setting, time_of_day, atmosphere
+- panel_count_hint: 3-6
+- page_note: why this page matters
+
+Return JSON:
+{{
+  "title": "...",
+  "summary": "...",
+  "genre": ["..."],
+  "pages": [
+    {{
+      "page_number": 1,
+      "narrative_arc": "...",
+      "emotional_shift": "...",
+      "key_moment": "...",
+      "key_panel_hint": "...",
+      "involved_characters": ["char_000"],
+      "setting": "...",
+      "time_of_day": "morning/afternoon/evening/night",
+      "atmosphere": "...",
+      "panel_count_hint": 4,
+      "page_note": "..."
+    }}
+  ]
+}}
+
+LANGUAGE: {language}. Output ONLY valid JSON object, no markdown, no extra text."""
+
+
+# ============================================================================
+# STAGE 2: Chunked Panelization System Prompt
+# ============================================================================
+
+_CHUNK_PANELIZATION_SYSTEM_PROMPT = """You are a panel-level comic script writer. You receive {chunk_size} consecutive page outlines and expand EACH into individual panels.
+
+CRITICAL CONTEXT AWARENESS:
+- These pages are CONSECUTIVE and narratively connected.
+- The "story_so_far" field tells you what happened before this block — use it to maintain continuity.
+- The last page of this block should set up a smooth transition to the next block (if there is one).
+
+For EACH page, return panels with this structure:
+{{
+  "page_number": N,
+  "panels": [
+    {{
+      "panel_id": "page_NNN_pNN",
+      "page_number": N,
+      "order_in_page": 1,
+      "narrative_purpose": "What this panel must accomplish narratively",
+      "character_id": "char_000 or empty string",
+      "character_action": "WHAT the character does (narrative, not visual)",
+      "dialogue_text": "",
+      "dialogue_tone": "angry/sad/joyful/fearful/determined/sarcastic/desperate/calm/nervous/cold/warm/curious/urgent",
+      "is_thought": false,
+      "narration": "",
+      "emotion": "tension/sorrow/joy/fear/determination/surprise/anger/calm/hope/despair/wonder/dread",
+      "emotion_intensity": 0.7,
+      "is_key_panel": false,
+      "location": "...",
+      "time_of_day": "morning/afternoon/evening/night",
+      "atmosphere": "tense/peaceful/oppressive/bright/gloomy/eerie/warm/cold"
+    }}
+  ]
+}}
+
+Return a single JSON object with a "pages" key containing the array of expanded pages:
+{{
+  "pages": [
+    {{ "page_number": 1, "panels": [...] }},
+    {{ "page_number": 2, "panels": [...] }}
+  ]
+}}
+
+RULES:
+1. Generate EXACTLY the requested number of panels per page (from panel_count_hint).
+2. Pages in this block must feel CONNECTED — emotional arcs should flow across page boundaries.
+3. The LAST page of the block should end with narrative momentum (hook for next block).
+4. EXACTLY ONE panel per page has is_key_panel=true.
+5. Spread dialogue naturally across panels in a page.
+6. Use character_id from designs; empty string for no-character panels.
+7. panel_id format: page_NNN_pNN (e.g. page_001_p01, page_001_p02).
+8. LANGUAGE: {language}. Output ONLY valid JSON object, no markdown, no extra text."""
+
+
+# ============================================================================
+# ScriptAgent v2.1
+# ============================================================================
+
+class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
+    """Script agent v2.1 — story → pages (Stage 1) → chunked panels (Stage 2)."""
+
+    name = "script_agent"
+    version = "2.1.0"
+    rubric_id = "rubric_script_v2"
+
+    def __init__(self, *args, chunk_size: int = DEFAULT_CHUNK_SIZE, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.chunk_size = chunk_size
+
+    async def run(self, inputs: ScriptInput, context: AgentContext) -> ScriptOutput:
+        if not self.config.llm.is_available:
+            raise ApiBackendError("LLM API not configured.")
+
+        import traceback as _tb
+
+        client = OpenAICompatibleLLMClient(self.config.llm)
+
+        # ---- Shared contexts ----
+        story = inputs.story
+        story_context = _build_story_context(story) if story else (
+            f'Create comic based on: "{inputs.raw_text}"\n\n'
+        )
+        char_context = _build_character_context(inputs.character_db)
+        lang = "Chinese" if inputs.language == "zh" else inputs.language
+
+        # =====================================================================
+        # STAGE 1: Pagination (1 call)
+        # =====================================================================
+        try:
+            page_outlines = await self._run_pagination(
+                client, inputs, story_context, char_context, lang
+            )
+        except Exception as exc:
+            raise ApiBackendError(
+                f"[Stage 1: Pagination] {type(exc).__name__}: {exc}\n{_tb.format_exc()}"
+            ) from exc
+
+        all_pages_data = page_outlines["pages"]
+
+        # Validate each page outline has required keys before Stage 2
+        _REQUIRED_OUTLINE_KEYS = (
+            "page_number", "narrative_arc", "key_moment", "panel_count_hint",
+        )
+        for i, outline in enumerate(all_pages_data):
+            if not isinstance(outline, dict):
+                raise ApiBackendError(
+                    f"Stage 1 page outline [{i}] is not a dict: "
+                    f"{type(outline).__name__} = {str(outline)[:100]}"
+                )
+            missing = [k for k in _REQUIRED_OUTLINE_KEYS if k not in outline]
+            if missing:
+                raise ApiBackendError(
+                    f"Stage 1 page outline [{i}] missing keys: {missing}. "
+                    f"Got keys: {list(outline.keys())[:10]}"
+                )
+
+        # =====================================================================
+        # STAGE 2: Chunked Panelization
+        # =====================================================================
+        try:
+            pages = await self._run_chunked_panelization(
+                client=client,
+                all_pages_data=all_pages_data,
+                char_context=char_context,
+                language=lang,
+                chunk_size=self.chunk_size,
+            )
+        except Exception as exc:
+            raise ApiBackendError(
+                f"[Stage 2: Panelization] {type(exc).__name__}: {exc}\n{_tb.format_exc()}"
+            ) from exc
+
+        # ---- Assemble ----
+        total_panels = sum(len(p.panels) for p in pages)
+
+        return ScriptOutput(
+            title=page_outlines.get("title", story.title if story else "Untitled"),
+            summary=page_outlines.get("summary", ""),
+            genre=page_outlines.get("genre", []),
+            pages=pages,
+            meta=AgentOutputMeta(
+                agent=self.name,
+                version=self.version,
+                inputs_hash=self._inputs_hash(inputs),
+                retry_count=context.retry_count,
+                self_check_notes=[
+                    f"LLM: {self.config.llm.provider}",
+                    f"Chunk size: {self.chunk_size}",
+                    f"Stage 1: 1 call → {len(all_pages_data)} page outlines",
+                    f"Stage 2: {(len(all_pages_data) + self.chunk_size - 1) // self.chunk_size} chunks",
+                    f"Output: {len(pages)} pages, {total_panels} panels",
+                ],
+            ),
+        )
+
+    # -------------------------------------------------------------------------
+    # Stage 1: Pagination
+    # -------------------------------------------------------------------------
+    async def _run_pagination(
+        self, client, inputs, story_context, char_context, lang
+    ) -> dict[str, Any]:
+        user_msg = (
+            f"{story_context}"
+            f"{char_context}"
+            f"\n=== PAGINATION PARAMETERS ===\n"
+            f"- Target pages: {inputs.target_pages}\n"
+            f"- Panels per page hint: {inputs.target_panels_per_page}\n"
+            f"- Approx total panels: {inputs.target_pages * inputs.target_panels_per_page}\n"
+            f"- Style: {inputs.style_hint or 'manga'}\n"
+            f"- Language: {inputs.language}\n\n"
+            f"Divide into EXACTLY {inputs.target_pages} pages. "
+            f"panel_count_hint between 3-6, vary for rhythm."
+        )
+        system_prompt = _PAGINATION_SYSTEM_PROMPT.format(language=lang)
+
+        try:
+            data = await asyncio.to_thread(
+                client.complete_json,
+                system_prompt,
+                {"user_message": user_msg},
+            )
+        except ApiBackendError:
+            raise ApiBackendError("Stage 1 (pagination) failed.") from None
+
+        # Validate pagination output structure
+        if not isinstance(data, dict):
+            raise ApiBackendError(
+                f"Pagination returned unexpected type: {type(data).__name__}"
+            )
+        if "pages" not in data:
+            raise ApiBackendError(
+                f"Pagination response missing 'pages' key. "
+                f"Got keys: {list(data.keys())[:10]}"
+            )
+        if len(data["pages"]) != inputs.target_pages:
+            raise ApiBackendError(
+                f"Pagination returned {len(data['pages'])} pages, "
+                f"expected {inputs.target_pages}."
+            )
+        return data
+
+    # -------------------------------------------------------------------------
+    # Stage 2: Chunked Panelization
+    # -------------------------------------------------------------------------
+    async def _run_chunked_panelization(
+        self,
+        client: OpenAICompatibleLLMClient,
+        all_pages_data: list[dict[str, Any]],
+        char_context: str,
+        language: str,
+        chunk_size: int,
+    ) -> list[ScriptPage]:
+        """Process pages in chunks. Chunks are sequential; pages within a chunk
+        are handled in ONE LLM call (Option A: max coherence)."""
+
+        # Split into chunks
+        chunks: list[list[dict[str, Any]]] = []
+        for i in range(0, len(all_pages_data), chunk_size):
+            chunks.append(all_pages_data[i : i + chunk_size])
+
+        all_script_pages: list[ScriptPage] = []
+        story_so_far = "Beginning of story."
+
+        for chunk_idx, chunk_pages in enumerate(chunks):
+            # Preview of next chunk for continuity hint
+            next_block_preview = None
+            if chunk_idx + 1 < len(chunks):
+                next_first = chunks[chunk_idx + 1][0]
+                next_block_preview = (
+                    f"Next block starts with Page {next_first['page_number']}: "
+                    f"{next_first['narrative_arc']} (Key: {next_first['key_moment']})"
+                )
+
+            chunk_pages_result = await self._panelize_chunk_together(
+                client=client,
+                chunk_pages=chunk_pages,
+                story_so_far=story_so_far,
+                next_block_preview=next_block_preview,
+                char_context=char_context,
+                language=language,
+            )
+
+            all_script_pages.extend(chunk_pages_result)
+
+            # Update story_so_far for next chunk
+            last_page = chunk_pages[-1]
+            story_so_far = (
+                f"Up to Page {last_page['page_number']}: "
+                f"{last_page['narrative_arc']} — {last_page['key_moment']}"
+            )
+
+        # Sort by page_number
+        all_script_pages.sort(key=lambda p: p.page_number)
+        return all_script_pages
+
+    # -------------------------------------------------------------------------
+    # Option A: One LLM call processes entire chunk — max coherence
+    # -------------------------------------------------------------------------
+    async def _panelize_chunk_together(
+        self,
+        client: OpenAICompatibleLLMClient,
+        chunk_pages: list[dict[str, Any]],
+        story_so_far: str,
+        next_block_preview: str | None,
+        char_context: str,
+        language: str,
+    ) -> list[ScriptPage]:
+        """Single LLM call for all pages in a chunk."""
+        page_nums = [p["page_number"] for p in chunk_pages]
+
+        # Build page descriptions
+        pages_desc = []
+        for p in chunk_pages:
+            pages_desc.append(
+                f"--- Page {p['page_number']} ---\n"
+                f"Narrative Arc: {p['narrative_arc']}\n"
+                f"Emotional Shift: {p['emotional_shift']}\n"
+                f"Key Moment: {p['key_moment']}\n"
+                f"Key Panel Type: {p['key_panel_hint']}\n"
+                f"Setting: {p['setting']} | Time: {p['time_of_day']} | Atmosphere: {p['atmosphere']}\n"
+                f"Characters: {', '.join(p.get('involved_characters', []))}\n"
+                f"Panel Count: {p['panel_count_hint']}\n"
+                f"Note: {p.get('page_note', '')}\n"
+            )
+
+        next_hint = (
+            f"\n=== NEXT BLOCK PREVIEW ===\n{next_block_preview}\n"
+            if next_block_preview
+            else ""
+        )
+
+        user_msg = (
+            f"=== STORY CONTEXT ===\n"
+            f"Story so far (before this block): {story_so_far}\n"
+            f"{next_hint}"
+            f"\n=== CHARACTER DESIGNS ===\n{char_context}\n"
+            f"\n=== PAGES TO EXPAND ({len(chunk_pages)} consecutive pages) ===\n"
+            f"{'\n'.join(pages_desc)}\n"
+            f"\nExpand each page into its specified number of panels. "
+            f"Maintain narrative flow ACROSS pages in this block. "
+            f"Return a JSON object with a 'pages' key containing the array "
+            f"of expanded page objects."
+        )
+
+        system_prompt = _CHUNK_PANELIZATION_SYSTEM_PROMPT.format(
+            chunk_size=len(chunk_pages),
+            language=language,
+        )
+
+        # Estimate required tokens: each panel ~350 tokens, plus JSON overhead
+        total_panels_in_chunk = sum(p.get("panel_count_hint", 4) for p in chunk_pages)
+        est_tokens = max(client.config.max_tokens, total_panels_in_chunk * 350)
+
+        try:
+            data = await asyncio.to_thread(
+                client.complete_json,
+                system_prompt,
+                {"user_message": user_msg},
+                est_tokens,
+            )
+        except ApiBackendError as e:
+            raise ApiBackendError(
+                f"Chunk {page_nums} panelization failed: {e}"
+            ) from e
+
+        # Parse response — expect {"pages": [...]} dict
+        if not isinstance(data, dict):
+            raise ApiBackendError(
+                f"Chunk {page_nums}: expected JSON object, got {type(data).__name__}"
+            )
+        if "pages" not in data:
+            raise ApiBackendError(
+                f"Chunk {page_nums}: response missing 'pages' key. "
+                f"Got keys: {list(data.keys())[:10]}"
+            )
+        pages_list = data["pages"]
+        if not isinstance(pages_list, list):
+            raise ApiBackendError(
+                f"Chunk {page_nums}: 'pages' must be an array, "
+                f"got {type(pages_list).__name__}"
+            )
+
+        script_pages: list[ScriptPage] = []
+        for page_data in pages_list:
+            try:
+                page_num = page_data["page_number"]
+                panels = []
+                for i, p in enumerate(page_data.get("panels", []), 1):
+                    if "panel_id" not in p:
+                        p["panel_id"] = f"page_{page_num:03d}_p{i:02d}"
+                    panels.append(PanelTask(**p))
+
+                # Find matching outline for page_note
+                outline = next(
+                    (o for o in chunk_pages if o["page_number"] == page_num), {}
+                )
+
+                script_pages.append(ScriptPage(
+                    page_number=page_num,
+                    page_note=outline.get("page_note", ""),
+                    panels=panels,
+                ))
+            except (ValidationError, KeyError, TypeError) as e:
+                raise ApiBackendError(
+                    f"Invalid panel data in chunk: {e}"
+                ) from e
+
+        return script_pages
+
+    # -------------------------------------------------------------------------
+    # Streaming
+    # -------------------------------------------------------------------------
+    async def astream(
+        self, inputs: ScriptInput, context: AgentContext
+    ) -> AsyncIterator[StreamEvent]:
+        yield self._make_event(StreamEventType.LOG, "阶段一：全局故事分页...")
+        yield self._make_event(StreamEventType.PROGRESS, 0.05)
+
+        await self._sleep_for_demo(0.1)
+        yield self._make_event(
+            StreamEventType.THINKING,
+            f"分析故事结构，规划{inputs.target_pages}页的叙事弧线..."
+        )
+        yield self._make_event(StreamEventType.PROGRESS, 0.15)
+
+        output = await self.run(inputs, context)
+
+        yield self._make_event(StreamEventType.PROGRESS, 0.9)
+        total_panels = sum(len(p.panels) for p in output.pages)
+        n_chunks = (len(output.pages) + self.chunk_size - 1) // self.chunk_size
+        yield self._make_event(
+            StreamEventType.PARTIAL_OUTPUT,
+            {
+                "title": output.title,
+                "pages": len(output.pages),
+                "total_panels": total_panels,
+                "chunks": n_chunks,
+            },
+        )
+        yield self._make_event(StreamEventType.PROGRESS, 1.0)
+        yield self._make_event(StreamEventType.DONE, output.model_dump())
+
+
+# ============================================================================
+# Helper functions
+# ============================================================================
+
 def _build_character_context(character_db: CharacterDB | None) -> str:
-    """Build a character reference block for the LLM prompt (v1.0)."""
+    """Build a character reference block for the LLM prompt."""
     if not character_db or not character_db.characters:
         return ""
 
-    lines = ["=== CHARACTER DESIGNS (use these in your script) ==="]
+    lines = ["=== CHARACTER DESIGNS ==="]
     for cid, cp in character_db.characters.items():
         vt = cp.visual_traits
         lines.append(
             f"- {cid}: {cp.name}"
-            f" | gender_tag: {cp.gender_tag}"
+            f" | gender: {cp.gender_tag}"
             f" | hair: {vt.hair}"
             f" | eyes: {vt.eyes}"
             f" | body: {vt.body}"
@@ -52,204 +506,6 @@ def _build_character_context(character_db: CharacterDB | None) -> str:
     lines.append("")
     return "\n".join(lines)
 
-
-_PANEL_SCRIPT_SYSTEM_PROMPT = """You are a professional comic script writer. Your job is to take a developed story and character designs, then produce a PANEL-BY-PANEL comic script. Each panel gets a clear NARRATIVE PURPOSE — what this panel needs to communicate to the reader.
-
-CRITICAL: You are writing a PERFORMABLE SCRIPT, not visual directions. Do NOT specify shot sizes, camera angles, poses, expressions, lighting, or weather. Those are cinematography decisions handled by a downstream agent. You define WHAT each panel must accomplish narratively.
-
-Each panel typically focuses on ONE character. Some panels may have NO character (establishing shots, scene transitions, atmosphere panels, narration-only panels).
-
-Return a single JSON object matching this EXACT structure:
-{
-  "title": "Comic title",
-  "summary": "1-2 sentence summary",
-  "genre": ["genre1", "genre2"],
-  "pages": [
-    {
-      "page_number": 1,
-      "page_note": "Optional page-level narrative note (e.g., 'This page establishes the world and introduces the protagonist')",
-      "panels": [
-        {
-          "panel_id": "page_001_p01",
-          "page_number": 1,
-          "order_in_page": 1,
-          "narrative_purpose": "What this panel must accomplish narratively. Be specific. Examples: 'Establish the rainy city setting and mood of isolation', 'Introduce the protagonist — show his determination despite exhaustion', 'Reaction beat — his hope shatters as he reads the letter', 'Deliver the key revelation dialogue', 'Transition — time passes, storm clears'",
-          "character_id": "char_000",
-          "character_action": "WHAT the character does in this panel (narrative action, not visual pose). e.g., 'searches frantically through old photographs', 'slumps against the wall in defeat', 'reaches out to grab the falling object'",
-          "dialogue_text": "The exact dialogue line for this panel (leave empty if no dialogue)",
-          "dialogue_tone": "Emotional tone of the dialogue: angry, sad, joyful, fearful, determined, sarcastic, desperate, calm, nervous, cold, warm, curious, urgent. Leave empty if no dialogue.",
-          "is_thought": false,
-          "narration": "Narrator text for this panel (leave empty if no narration)",
-          "emotion": "Primary emotion of this panel: tension, sorrow, joy, fear, determination, surprise, anger, calm, hope, despair, wonder, dread",
-          "emotion_intensity": 0.7,
-          "is_key_panel": false,
-          "location": "WHERE this panel takes place (narrative location, not background description)",
-          "time_of_day": "morning/afternoon/evening/night",
-          "atmosphere": "Mood of the environment: tense, peaceful, oppressive, bright, gloomy, eerie, warm, cold"
-        }
-      ]
-    }
-  ]
-}
-
-=== RULES ===
-
-1. PANEL COUNT: Each page should have 3-6 panels. Vary panel count for rhythm — not every page needs the same number. The total number of panels across all pages should feel appropriate for the story's pacing.
-
-2. NARRATIVE PURPOSE: Every panel MUST have a clear, specific narrative_purpose. This is the MOST IMPORTANT field. Ask yourself: "What does the reader learn or feel from this panel?" The narrative_purpose should describe the narrative function, NOT the visual look. Good: "Reveal the antagonist's true motive through a tense confrontation." Bad: "Close-up shot of the antagonist's face."
-
-3. CHARACTER ACTIONS: Describe WHAT the character does in narrative terms. Good: "confronts the antagonist about the betrayal." Bad: "standing with arms crossed, angry expression." The downstream agent will figure out the visual pose.
-
-4. DIALOGUE: Assign each dialogue line to a specific panel. One panel = one key dialogue beat. If a conversation needs multiple lines, spread them across consecutive panels for natural pacing. dialogue_tone must be specific — never use "neutral" unless truly neutral.
-
-5. EMOTIONAL ARC: emotion_intensity should flow naturally across panels. Build tension gradually, peak at key moments, and allow release. Not every panel needs high intensity — quiet moments create contrast.
-
-6. PAGE RHYTHM: Each page should have one is_key_panel (focal panel). This is the most important narrative beat on the page — often the climax of the page's mini-arc. Vary the position of the key panel across pages.
-
-7. CHARACTER USAGE: Reference characters by their char_id (char_000, char_001, etc.) from the character designs provided. Panels with no character (character_id="") are for establishing shots, transitions, and atmosphere.
-
-8. LOCATION/ATMOSPHERE: Provide narrative context for each panel's setting. These help the downstream agent understand WHERE the story is happening, not HOW to draw it.
-
-9. LANGUAGE: Write in the language specified in the user prompt. For Chinese (zh), write all text fields in Chinese (narrative_purpose, character_action, dialogue_text, narration, location, atmosphere, etc.).
-
-10. Output ONLY the JSON object, no markdown, no extra text."""
-
-
-class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
-    """Script agent — story + character designs → panel-level script."""
-
-    name = "script_agent"
-    version = "1.0.0"
-    rubric_id = "rubric_script_v1"
-
-    async def run(self, inputs: ScriptInput, context: AgentContext) -> ScriptOutput:
-        if not self.config.llm.is_available:
-            raise ApiBackendError(
-                "LLM API is not configured — ScriptAgent requires a working LLM "
-                "to generate panel-level scripts."
-            )
-        return await self._run_api(inputs, context)
-
-    async def _run_api(self, inputs: ScriptInput, context: AgentContext) -> ScriptOutput:
-        from pydantic import ValidationError
-
-        client = OpenAICompatibleLLMClient(self.config.llm)
-
-        # Build story context
-        story = inputs.story
-        if story:
-            story_context = _build_story_context(story)
-        else:
-            story_context = f'Create a comic script based on this idea:\n\n"{inputs.raw_text}"\n\n'
-
-        # Build character context (v1.0)
-        char_context = _build_character_context(inputs.character_db)
-
-        target_panels = inputs.target_pages * inputs.target_panels_per_page
-
-        user_message = (
-            f"{story_context}"
-            f"{char_context}"
-            f"\n=== SCRIPT PARAMETERS ===\n"
-            f"- Target pages: {inputs.target_pages}\n"
-            f"- Target panels per page: {inputs.target_panels_per_page}\n"
-            f"- Total target panels: approximately {target_panels}\n"
-            f"- Style: {inputs.style_hint or 'manga'}\n"
-            f"- Language: {inputs.language}\n\n"
-            f"IMPORTANT:\n"
-            f"- Write ALL text fields in {'Chinese' if inputs.language == 'zh' else inputs.language}\n"
-            f"- Assign specific char_id values from the character designs above\n"
-            f"- Some panels may have no character (character_id='') for establishing/transition panels\n"
-            f"- Every panel MUST have a meaningful narrative_purpose\n"
-            f"- Vary emotion_intensity across panels for dramatic rhythm\n"
-        )
-
-        try:
-            data = await asyncio.to_thread(
-                client.complete_json,
-                _PANEL_SCRIPT_SYSTEM_PROMPT,
-                {"user_message": user_message},
-            )
-        except ApiBackendError:
-            raise ApiBackendError(
-                "ScriptAgent LLM call failed — cannot generate panel script."
-            ) from None
-
-        try:
-            output = ScriptOutput.model_validate(data)
-        except ValidationError:
-            if len(data) == 1 and isinstance(list(data.values())[0], dict):
-                try:
-                    output = ScriptOutput.model_validate(list(data.values())[0])
-                except ValidationError:
-                    raise ApiBackendError(
-                        "ScriptAgent received invalid JSON from LLM."
-                    )
-            else:
-                raise ApiBackendError(
-                    "ScriptAgent received invalid JSON from LLM."
-                )
-
-        title = output.title
-        if not title or title.strip().lower() in ("untitled", "无题", ""):
-            title = story.title if story else "Untitled"
-            output = output.model_copy(update={"title": title})
-
-        total_panels = sum(len(p.panels) for p in output.pages)
-
-        return output.model_copy(update={
-            "meta": AgentOutputMeta(
-                agent=self.name,
-                version=self.version,
-                inputs_hash=self._inputs_hash(inputs),
-                retry_count=context.retry_count,
-                self_check_notes=[
-                    f"LLM: {self.config.llm.provider}",
-                    f"Output: {len(output.pages)} pages, {total_panels} panels",
-                    f"Characters in context: {len(inputs.character_db.characters) if inputs.character_db else 0}",
-                ],
-            )
-        })
-
-    async def astream(
-        self, inputs: ScriptInput, context: AgentContext
-    ) -> AsyncIterator[StreamEvent]:
-        yield self._make_event(StreamEventType.LOG, "开始设计面板级剧本...")
-        yield self._make_event(StreamEventType.PROGRESS, 0.1)
-
-        await self._sleep_for_demo(0.15)
-        char_count = len(inputs.character_db.characters) if inputs.character_db else 0
-        yield self._make_event(
-            StreamEventType.THINKING,
-            f"基于{char_count}个角色设计，规划{inputs.target_pages}页面板叙事..."
-        )
-        yield self._make_event(StreamEventType.PROGRESS, 0.3)
-
-        await self._sleep_for_demo(0.15)
-        yield self._make_event(StreamEventType.THINKING, "为每格分配叙事任务与对白...")
-        yield self._make_event(StreamEventType.PROGRESS, 0.6)
-
-        await self._sleep_for_demo(0.15)
-        yield self._make_event(StreamEventType.THINKING, "设计情感曲线与页面节奏...")
-        yield self._make_event(StreamEventType.PROGRESS, 0.85)
-
-        output = await self.run(inputs, context)
-        total_panels = sum(len(p.panels) for p in output.pages)
-        yield self._make_event(
-            StreamEventType.PARTIAL_OUTPUT,
-            {
-                "title": output.title,
-                "pages": len(output.pages),
-                "total_panels": total_panels,
-            },
-        )
-        yield self._make_event(StreamEventType.PROGRESS, 1.0)
-        yield self._make_event(StreamEventType.DONE, output.model_dump())
-
-
-# ---------------------------------------------------------------------------
-# Helpers (shared with _build_story_context from v0.2)
-# ---------------------------------------------------------------------------
 
 def _build_story_context(story) -> str:
     """Build story context for ScriptAgent LLM prompt from StoryOutput."""
@@ -261,7 +517,8 @@ def _build_story_context(story) -> str:
 
     if story_text:
         char_lines = "\n".join(
-            f"  - {c.get('name', '?')} ({c.get('role', '?')}): {c.get('brief_description', '')}"
+            f"  - {c.get('name', '?')} ({c.get('role', '?')}): "
+            f"{c.get('brief_description', '')}"
             for c in characters
         )
         return (
@@ -272,7 +529,8 @@ def _build_story_context(story) -> str:
             f"Genre: {', '.join(story.genre)}\n"
             f"Setting: {setting}\n"
             f"Core Conflict: {story.core_conflict}\n"
-            f"Story Characters (informational — use character designs below for visual details):\n{char_lines}\n"
+            f"Story Characters (informational — use character designs below "
+            f"for visual details):\n{char_lines}\n"
             f"\n=== FULL STORY TEXT ===\n"
             f"{story_text}\n"
         )

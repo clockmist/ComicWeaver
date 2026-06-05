@@ -101,7 +101,7 @@ class OpenAICompatibleLLMClient:
     def available(self) -> bool:
         return self.config.is_available
 
-    def complete_json(self, system_prompt: str, user_payload: dict[str, Any]) -> dict[str, Any]:
+    def complete_json(self, system_prompt: str, user_payload: dict[str, Any], max_tokens: int | None = None) -> dict[str, Any]:
         if not self.available:
             raise ApiBackendError("LLM API is not configured")
 
@@ -113,6 +113,8 @@ class OpenAICompatibleLLMClient:
             ),
         ]
 
+        _max_tokens = max_tokens or self.config.max_tokens
+
         last_error: Exception | None = None
         # 外层：先尝试 json_object，失败后回退到无格式约束
         for outer_attempt in range(2):
@@ -120,7 +122,7 @@ class OpenAICompatibleLLMClient:
                 model=self.config.model,
                 messages=messages,
                 temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
+                max_tokens=_max_tokens,
             )
             if outer_attempt == 0:
                 req.response_format = {"type": "json_object"}
