@@ -382,7 +382,7 @@ class BubbleHint(BaseModel):
 
 
 class PreviousPanelContext(BaseModel):
-    """前一面板的上下文，用于保持视觉连续性 (v0.4)。"""
+    """前一面板的上下文，用于保持视觉连续性 (v0.4, v0.6: +narrative_purpose)。"""
     panel_id: str = ""
     shot_size: str = ""             # ShotSize value
     camera_angle: str = ""          # CameraAngle value
@@ -392,6 +392,7 @@ class PreviousPanelContext(BaseModel):
     setting_summary: str = ""       # 前一格的场景/背景
     emotion: str = ""               # 前一格的情绪 (mood)
     emotion_intensity: float = 0.5
+    narrative_purpose: str = ""     # v0.6: 前一格的叙事目的 — 面板间叙事连续性
 
 
 class PanelPlan(BaseModel):
@@ -434,8 +435,9 @@ class PageLayout(BaseModel):
 
 
 class StoryboardInput(BaseModel):
-    scenes: list[Scene]
-    emotion_curve: list[float]
+    scenes: list[Scene] = Field(default_factory=list)           # v0.6: 已弃用，保留兼容
+    pages: list[ScriptPage] = Field(default_factory=list)       # v0.6: 直接消费 PanelTask（替代 scenes）
+    emotion_curve: list[float] = Field(default_factory=list)
     character_db: CharacterDB | None = None
     style_preset: str = "manga"
     target_pages: int = 4

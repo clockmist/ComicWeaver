@@ -42,6 +42,7 @@ from comicweaver.core import (
     PanelImage,
     Scene,
     ScriptInput,
+    ScriptPage,
     StoryInput,
     StoryOutput,
     StoryboardInput,
@@ -405,12 +406,16 @@ class ComicWorkflow:
         ctx = self._make_context(state)
         script_dict = state.get("structured_script", {})
 
-        # v1.0: 优先读新格式 pages (PanelTask)，兼容旧格式 scenes
+        # v0.6: 优先传 pages（PanelTask），StoryboardAgent 直接消费
         raw_pages = script_dict.get("pages") or []
         if raw_pages:
-            scenes = _panel_tasks_to_scenes(raw_pages)
+            pages = [ScriptPage.model_validate(p) for p in raw_pages]
+            scenes = []
+            source_format = "pages(v1.0-direct)"
         else:
+            pages = []
             scenes = [Scene.model_validate(s) for s in script_dict.get("scenes", [])]
+            source_format = "scenes(legacy)"
 
         cdb_dict = state.get("character_db") or {}
         cdb = CharacterDB.model_validate(cdb_dict) if cdb_dict else None
@@ -422,6 +427,7 @@ class ComicWorkflow:
         narrative_structure = NarrativeStructure.model_validate(ns_dict) if ns_dict else None
 
         inputs = StoryboardInput(
+            pages=pages,
             scenes=scenes,
             emotion_curve=state.get("emotion_curve", []),
             character_db=cdb,
@@ -432,9 +438,11 @@ class ComicWorkflow:
         )
 
         # 开发者日志：Agent 输入
+        total_panels = sum(len(p.panels) for p in pages) if pages else len(scenes)
         writer(log_agent_input("storyboard_agent", {
-            "scene_count": len(scenes),
-            "source_format": "pages(v1.0)" if raw_pages else "scenes(legacy)",
+            "panel_count": total_panels,
+            "page_count": len(pages) if pages else len(scenes),
+            "source_format": source_format,
             "target_pages": inputs.target_pages,
             "has_character_db": cdb is not None,
         }))
@@ -456,7 +464,7 @@ class ComicWorkflow:
                             summarize_storyboard_output(evt.content)))
             except Exception as exc:
                 writer(log_agent_error("storyboard_agent", f"执行失败: {exc}",
-                    {"scene_count": len(scenes), "target_pages": inputs.target_pages, "error_type": type(exc).__name__}))
+                    {"panel_count": total_panels, "target_pages": inputs.target_pages, "error_type": type(exc).__name__, "source_format": source_format}))
                 raise
 
             # --- Checkpoint & auto-save ---
