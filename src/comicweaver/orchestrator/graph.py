@@ -13,7 +13,6 @@ from typing import Any
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command, interrupt
 
 from comicweaver.agents import (
     CharacterAgent,
@@ -23,11 +22,13 @@ from comicweaver.agents import (
     StoryAgent,
     StoryboardAgent,
 )
+from comicweaver.agents.layout_agent import solve_page_bboxes
 from comicweaver.api import ApiBackendError
 from comicweaver.config import load_config
 from comicweaver.core import (
     Action,
     AgentContext,
+    BoundingBox,
     CharacterDB,
     CharacterDraft,
     CharacterInput,
@@ -43,9 +44,9 @@ from comicweaver.core import (
     Scene,
     ScriptInput,
     ScriptPage,
+    StoryboardInput,
     StoryInput,
     StoryOutput,
-    StoryboardInput,
     StreamEventType,
 )
 from comicweaver.storage import save_project, state_to_project
@@ -67,12 +68,13 @@ from comicweaver.utils.logging import (
 )
 
 from .types import (
-    CheckpointSignal,
     KEY_CHECKPOINTS,
+    CheckpointSignal,
     WorkflowEvent,
     WorkflowMessage,
     should_pause,
 )
+
 
 class ComicWorkflow:
     """漫画创作工作流执行器（基于 LangGraph StateGraph）。
@@ -506,6 +508,9 @@ class ComicWorkflow:
                 "storyboard_plan is empty — no panels to generate images for"
             )
         pages = [PageLayout.model_validate(p) for p in raw_storyboard]
+        layout_grids, image_sizes = _precompute_layout_targets(pages)
+        state["storyboard_plan"] = [page.model_dump() for page in pages]
+        state["layout_grids"] = layout_grids
         all_panel_images: list[dict] = []
         total_panels = sum(len(page.panels) for page in pages)
 
@@ -519,6 +524,7 @@ class ComicWorkflow:
             "backend_preference": "auto",
             "character_db_available": character_db is not None,
             "character_count": len(character_db.characters) if character_db else 0,
+            "layout_precomputed": True,
         }))
 
         panel_idx = 0
@@ -533,6 +539,8 @@ class ComicWorkflow:
                     reference_windows=ref_windows,
                     character_db=character_db,
                     style_preset="black and white manga",
+                    width=image_sizes.get(panel.panel_id, (1024, 1024))[0],
+                    height=image_sizes.get(panel.panel_id, (1024, 1024))[1],
                 )
                 try:
                     async for evt in self.image_agent.astream(inputs, ctx):
@@ -565,7 +573,6 @@ class ComicWorkflow:
                                     seed=pi.get("seed", 0),
                                 ))
                             # 检测 fallback
-                            backend_used = evt.content.get("backend_used", "?")
                             fallback_chain = evt.content.get("fallback_chain", [])
                             if fallback_chain and len(fallback_chain) > 1:
                                 writer(log_fallback(
@@ -766,7 +773,7 @@ class ComicWorkflow:
             self._loop.call_soon_threadsafe(self._response_event.set)
 
     @classmethod
-    def from_saved_project(cls, project_id: str) -> "ComicWorkflow | None":
+    def from_saved_project(cls, project_id: str) -> ComicWorkflow | None:
         """从已保存的项目创建可恢复的 ComicWorkflow。
 
         加载 project.json，读取 current_phase，从下一个阶段继续执行
@@ -883,7 +890,6 @@ def _panel_tasks_to_scenes(raw_pages: list[dict]) -> list[Scene]:
     """
     scenes = []
     for page in raw_pages:
-        page_num = page.get("page_number", 1)
         for panel in page.get("panels", []):
             panel_id = panel.get("panel_id", "")
             char_id = panel.get("character_id", "")
@@ -922,3 +928,95 @@ def _extract_emotion_curve(script_content: dict) -> list[float]:
             if intensity is not None:
                 curve.append(float(intensity))
     return curve
+
+
+def _round_to_multiple(value: float, multiple: int) -> int:
+    return max(multiple, int(round(value / multiple)) * multiple)
+
+
+def _generation_size_from_bbox(
+    bbox: BoundingBox,
+    *,
+    page_width_px: int = 1240,
+    page_height_px: int = 1754,
+    margin_px: int = 40,
+    multiple: int = 64,
+    min_short_side: int = 384,
+    max_long_side: int = 1536,
+) -> tuple[int, int]:
+    """Convert a solved page bbox into a model-friendly generation size.
+
+    The final compositor works in page pixels, but diffusion backends are more
+    stable on dimensions aligned to latent-friendly multiples. This preserves
+    the solved panel aspect ratio while keeping resolution in a practical range.
+    """
+    inner_w = max(1, page_width_px - margin_px * 2)
+    inner_h = max(1, page_height_px - margin_px * 2)
+    slot_w = max(1.0, inner_w * bbox.width)
+    slot_h = max(1.0, inner_h * bbox.height)
+
+    short_side = min(slot_w, slot_h)
+    long_side = max(slot_w, slot_h)
+    scale = 1.0
+    if short_side < min_short_side:
+        scale = max(scale, min_short_side / short_side)
+    if long_side * scale > max_long_side:
+        scale = max_long_side / long_side
+
+    width = _round_to_multiple(slot_w * scale, multiple)
+    height = _round_to_multiple(slot_h * scale, multiple)
+
+    if max(width, height) > max_long_side:
+        cap_scale = max_long_side / max(width, height)
+        width = _round_to_multiple(width * cap_scale, multiple)
+        height = _round_to_multiple(height * cap_scale, multiple)
+
+    return width, height
+
+
+def _precompute_layout_targets(
+    pages: list[PageLayout],
+    *,
+    page_width_px: int = 1240,
+    page_height_px: int = 1754,
+    margin_px: int = 40,
+    gutter_px: int = 10,
+) -> tuple[list[dict], dict[str, tuple[int, int]]]:
+    """Solve final panel bboxes before image generation and derive image sizes."""
+    layout_grids: list[dict] = []
+    image_sizes: dict[str, tuple[int, int]] = {}
+
+    for page in pages:
+        bboxes = solve_page_bboxes(
+            page,
+            page_width_px=page_width_px,
+            page_height_px=page_height_px,
+            margin_px=margin_px,
+            gutter_px=gutter_px,
+        )
+        panel_entries = []
+        for panel, bbox in zip(page.panels, bboxes, strict=False):
+            width, height = _generation_size_from_bbox(
+                bbox,
+                page_width_px=page_width_px,
+                page_height_px=page_height_px,
+                margin_px=margin_px,
+            )
+            panel.bbox = bbox
+            panel.size_ratio = bbox.width * bbox.height
+            image_sizes[panel.panel_id] = (width, height)
+            panel_entries.append({
+                "panel_id": panel.panel_id,
+                "bbox": bbox.model_dump(),
+                "target_width": width,
+                "target_height": height,
+            })
+        layout_grids.append({
+            "page_id": page.page_id,
+            "page_number": page.page_number,
+            "width_px": page_width_px,
+            "height_px": page_height_px,
+            "panels": panel_entries,
+        })
+
+    return layout_grids, image_sizes
