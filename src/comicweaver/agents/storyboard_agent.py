@@ -75,10 +75,12 @@ NEGATIVE_PROMPT = (
 )
 
 NEGATIVE_BY_SHOT: dict[str, str] = {
-    "extreme_close": "bad face, bad eyes, asymmetrical eyes, mutated face",
-    "close": "bad face, bad eyes, asymmetrical eyes, mutated face",
-    "extreme_long": "tiny figure, unclear silhouette, cluttered composition",
-    "long": "tiny figure, unclear silhouette, cluttered composition",
+    "extreme_close": "bad face, bad eyes, asymmetrical eyes, mutated face, wide shot, full body",
+    "close": "bad face, bad eyes, asymmetrical eyes, mutated face, wide shot, full body",
+    "extreme_long": "tiny figure, unclear silhouette, cluttered composition, close-up, portrait, face focus, looking at viewer",
+    "long": "tiny figure, unclear silhouette, cluttered composition, close-up, portrait, face focus, looking at viewer",
+    "full": "close-up, portrait, face focus, looking at viewer, upper body",
+    "medium": "close-up, portrait, face focus, wide shot, panoramic",
 }
 
 
@@ -88,69 +90,106 @@ NEGATIVE_BY_SHOT: dict[str, str] = {
 
 _STORYBOARD_SYSTEM_PROMPT = """You are a prompt engineer for Animagine-XL-4.0 black-and-white manga.
 
-For each panel, translate narrative description into visual tags.
+For each panel, translate narrative description into visual tags. Your job is to describe WHAT FILLS THE FRAME — not just the character, but the entire visual world of this panel.
 
 Output JSON:
 {
   "filtered_char_tags": "character tags visible in this shot, or empty string if no character",
-  "scene_description": "3-8 visual tags: pose, expression, setting, lighting",
+  "scene_description": "6-12 visual tags describing THE ENTIRE SCENE. THIS IS THE MOST IMPORTANT FIELD. See rules below.",
   "shot_size": "extreme_long|long|full|medium|close|extreme_close",
   "camera_angle": "eye_level|high_angle|low_angle|dutch_angle"
 }
 
+=== SCENE_DESCRIPTION: ENVIRONMENT FIRST (CRITICAL — this makes or breaks the image) ===
+scene_description MUST describe the COMPLETE visual scene, not just the character. The character is only ONE element in a larger visual composition.
+
+TAG ORDER (strict — earlier = more weight in image generation):
+  1. Environment/setting tags FIRST (architecture, terrain, props, objects, weather, lighting, atmosphere)
+  2. Character pose/action tags SECOND
+  3. Character expression/face tags LAST
+
+MINIMUM ENVIRONMENT TAGS by shot type:
+  - extreme_long / long: at least 5-8 environment tags, 0-2 character tags (character is small in frame)
+  - full: at least 3-5 environment tags, 2-3 character tags
+  - medium: at least 2-3 environment/background tags, 2-3 character tags
+  - close: at least 1-2 environment/background tags, 3-4 character face/expression tags
+  - extreme_close: 0-1 environment tags, 4-5 character detail tags
+
+CONCRETE VISUAL TAGS ONLY:
+  - YES: "broken windows", "steam pipes", "graffiti wall", "flickering lamp", "puddled floor", "rusty railing"
+  - NO: "lonely atmosphere", "tense mood", "sad feeling" (these are abstract, not visual)
+  - NO: "morning light", "sunlight", "natural light", "soft light", "harsh light"
+  - Instead use: "light shafts", "backlit", "lantern glow", "neon reflection", "candlelit", "shadow patterns"
+
+NO quality/style tags (added automatically): masterpiece, monochrome, screentone, etc.
+
+=== SHOT DISTRIBUTION (CRITICAL — think like a cinematographer) ===
+Real comics use VARIED shot sizes. Do NOT default to medium/close for every panel.
+- extreme_long / long: ~30-35% of panels — establishing shots, environment, action scenes, character small in context
+- full: ~15-20% of panels — full-body character with environment visible
+- medium: ~25-30% of panels — upper body with some background
+- close / extreme_close: ~10-15% of panels — ONLY for emotional climax, key reaction, or critical detail
+- VARY shot sizes across consecutive panels — never use the same shot twice in a row for character panels.
+- First panel of each page should usually be an establishing/location shot (extreme_long or long) to orient the reader.
+- camera_angle should vary: use high_angle for vulnerability, low_angle for power/threat, dutch_angle for disorientation/unease.
+
 === CHARACTER DETECTION ===
 CRITICAL: Check if the panel has a character.
 
-- If character_id is EMPTY or character_action is EMPTY: 
+- If character_id is EMPTY or character_action is EMPTY:
   - This is a BACKGROUND/ESTABLISHING panel with NO character.
   - filtered_char_tags MUST be "" (empty string).
-  - scene_description should focus on environment, atmosphere, architecture.
-  - shot_size should be extreme_long or long.
+  - scene_description should be 100% environment/atmosphere/architecture tags.
+  - shot_size must be extreme_long or long.
 
 - If character_id exists and character_action exists:
   - This panel HAS a character.
   - Filter character tags based on shot_size (see below).
-  - scene_description should include pose and expression.
+  - Choose shot_size based on narrative purpose (NOT just defaulting to medium):
+    * Action/movement in a big space → long or full to show the action in context
+    * Dialogue/conversation in a room → medium or full, show the space
+    * Emotional reaction in context → medium (show face + surroundings)
+    * Pure emotional climax → close or extreme_close (rare!)
+    * Character introduction → full (show the whole person in their world)
 
 === TAG FILTERING (character panels only) ===
 You receive a COMPLETE tag list from the character designer. REMOVE only tags not visible in this shot. NEVER add new tags.
 
 - extreme_long: gender + solo + 1 silhouette tag
-- long: gender + solo + 2-3 silhouette tags  
+- long: gender + solo + 2-3 silhouette tags
 - full: all tags
 - medium: head + upper body clothing
 - close: head + eyes + face accessories
 - extreme_close: eyes + mouth + eyebrows
 
-NEVER invent tags like "round eyes" or "bright eyes". Use ONLY provided tags.
-
-=== SCENE_DESCRIPTION RULES ===
-- NO quality tags (masterpiece, etc.) — added automatically.
-- NO style tags (monochrome, etc.) — added automatically.
-- NO abstract mood words: serene, calm, curious, solemn, determined, oppressive atmosphere.
-- NO "morning light", "sunlight", "natural light", "soft light".
-- NO "no_xxx" tags.
-- Use concrete visual tags only.
+NEVER invent tags. Use ONLY provided tags.
 
 === ACTION TAGS ===
 - At most 2 action tags per panel.
 - Pick the MOST IMPORTANT pose for this moment.
 - BAD: "jumping, aiming, firing" → GOOD: "jumping, aiming pistol"
-- BAD: "rolling, tossing, tripping" → GOOD: "rolling to side, arm extended"
 
-=== EXAMPLES ===
+=== EXAMPLES (study the scene_description carefully — ENVIRONMENT ALWAYS FIRST) ===
 
-Example 1 — NO CHARACTER (establishing shot):
-Input: character_id="", character_action="", narrative_purpose="展现废铁城压抑的环境，灰黄烟尘笼罩街道，机械塔楼高耸，废弃车辆和管道堆积", emotion="tension", emotion_intensity=0.6, location="废铁城街道，机械塔楼下", time_of_day="evening"
-Output: {"filtered_char_tags":"","scene_description":"industrial ruins,smoke,tall towers,pipes,abandoned vehicles,harsh shadows,dim light","shot_size":"extreme_long","camera_angle":"eye_level"}
+Example 1 — NO CHARACTER (establishing shot, 100% environment):
+Input: character_id="", character_action="", narrative_purpose="废铁城全景：灰黄烟尘笼罩街道，机械塔楼高耸入云，废弃车辆和锈蚀管道堆积成山，远处工厂烟囱喷着黑烟", emotion="tension", emotion_intensity=0.6, location="废铁城工业区，机械塔楼下", time_of_day="evening"
+Output: {"filtered_char_tags":"","scene_description":"industrial ruins,tall mechanical towers,smoke and dust,smashed vehicles,rusty pipes piled high,factory chimneys,dark sky,harsh shadows,dim orange glow","shot_size":"extreme_long","camera_angle":"high_angle"}
 
-Example 2 — CHARACTER MEDIUM SHOT:
-Input: character_id="char_000", character_action="leaning out from behind wrecked car, observing", narrative_purpose="男角色从掩体后探出观察敌情", emotion="tension", emotion_intensity=0.6, location="废铁城街道", time_of_day="evening", character_tags="1boy,solo,young_adult,short hair,spiky hair,black hair,sharp eyes,grey eyes,jacket,torn clothing,athletic"
-Output: {"filtered_char_tags":"1boy,solo,young_adult,short hair,spiky hair,black hair,sharp eyes,grey eyes,jacket,torn clothing,athletic","scene_description":"leaning forward,hand on car,looking ahead,furrowed brow,smoke,dim light","shot_size":"medium","camera_angle":"eye_level"}
+Example 2 — CHARACTER LONG SHOT (environment dominates, character is small):
+Input: character_id="char_000", character_action="running through debris-filled street, dodging falling pipes", narrative_purpose="雨夜后巷，积水倒映霓虹招牌红光，穿风衣的模糊人影在巷口闪过，林晓在消防梯阴影下手按刀柄", emotion="tension", emotion_intensity=0.7, location="雨夜后巷，霓虹招牌，消防梯", time_of_day="night", character_tags="1boy,solo,young_adult,short hair,spiky hair,black hair,sharp eyes,grey eyes,jacket,torn clothing,athletic"
+Output: {"filtered_char_tags":"1boy,solo,short hair,spiky hair,black hair","scene_description":"rainy alley,puddle reflections,neon sign glow,fire escape shadows,steam from manhole,brick walls,running figure in distance,wet pavement","shot_size":"long","camera_angle":"eye_level"}
 
-Example 3 — CHARACTER CLOSE-UP:
-Input: character_id="char_001", character_action="peering through scope, targeting", narrative_purpose="女角色瞄准敌人", emotion="tension", emotion_intensity=0.8, location="废铁城街道", time_of_day="evening", character_tags="1girl,solo,young_adult,long hair,straight hair,black hair,large eyes,green eyes,tactical vest,fitted shirt,cargo pants,slim"
-Output: {"filtered_char_tags":"1girl,solo,young_adult,long hair,straight hair,black hair,large eyes,green eyes","scene_description":"peering through scope,looking ahead,furrowed brows,parted lips,harsh shadows","shot_size":"close","camera_angle":"eye_level"}
+Example 3 — CHARACTER FULL SHOT (balanced environment + full body):
+Input: character_id="char_000", character_action="kneeling beside collapsed machine, digging through rubble with bare hands", narrative_purpose="废弃工厂内部，阳光从破碎屋顶斜射形成光柱，粉尘悬浮，林晓跪在倒塌机器旁双手扒开瓦砾，露出苍白的手", emotion="fear", emotion_intensity=0.6, location="废弃机械工厂内部", time_of_day="afternoon", character_tags="1boy,solo,young_adult,short hair,spiky hair,black hair,sharp eyes,grey eyes,jacket,torn clothing,athletic"
+Output: {"filtered_char_tags":"1boy,solo,young_adult,short hair,spiky hair,black hair,sharp eyes,grey eyes,jacket,torn clothing,athletic","scene_description":"abandoned factory interior,shattered roof,light shafts through ceiling,dust motes floating,collapsed machinery,rubble and debris,kneeling,digging through rubble,pale hand visible in debris","shot_size":"full","camera_angle":"high_angle"}
+
+Example 4 — CHARACTER MEDIUM SHOT (visible background):
+Input: character_id="char_000", character_action="leaning out from behind wrecked car, observing", narrative_purpose="废车残骸后，林晓探出半身，一只手紧握钢管，远处黑影在烟尘中逼近", emotion="tension", emotion_intensity=0.6, location="废铁城街道，废车残骸", time_of_day="evening", character_tags="1boy,solo,young_adult,short hair,spiky hair,black hair,sharp eyes,grey eyes,jacket,torn clothing,athletic"
+Output: {"filtered_char_tags":"1boy,solo,young_adult,short hair,spiky hair,black hair,sharp eyes,grey eyes,jacket,torn clothing,athletic","scene_description":"wrecked car in foreground,smoke and dust,approaching shadowy figures,distant industrial structures,dim streetlight,leaning forward,gripping steel pipe,tense expression","shot_size":"medium","camera_angle":"eye_level"}
+
+Example 5 — CHARACTER CLOSE-UP (emotional climax, rare):
+Input: character_id="char_001", character_action="peering through rifle scope, finger on trigger, sweat dripping", narrative_purpose="极近距离：瞄准镜后的眼睛，汗水沿眉骨滑落，准星中对准远处目标", emotion="tension", emotion_intensity=0.9, location="废墟楼顶边缘", time_of_day="evening", character_tags="1girl,solo,young_adult,long hair,straight hair,black hair,large eyes,green eyes,tactical vest,fitted shirt,cargo pants,slim"
+Output: {"filtered_char_tags":"1girl,solo,long hair,straight hair,black hair,large eyes,green eyes","scene_description":"scope lens reflection,crosshair overlay,rooftop edge visible,sweat on brow,focused eyes,tense finger","shot_size":"extreme_close","camera_angle":"eye_level"}
 
 Output ONLY valid JSON. No markdown, no extra text."""
 
@@ -178,22 +217,46 @@ def _deduplicate_tags(tags_str: str) -> str:
 # ============================================================================
 
 def _build_prompt_from_llm(llm_output: dict, char_gender_tag: str) -> PromptPack:
-    """v0.7: Pure concatenation — all decisions made by the LLM.
+    """v2.0: Shot-aware prompt assembly — all decisions made by the LLM.
 
-    Assembles: PREFIX + filtered_char_tags + scene_description + SUFFIX.
+    Tag order varies by shot_size to weight the image model correctly:
+    - extreme_long/long/full/medium:  environment >> character (scene_description first)
+    - close/extreme_close:            character > environment (character tags first)
+
+    v1.0 fix: shot_size and camera_angle composition tags injected into prompt.
     """
     filtered_char_tags = (llm_output.get("filtered_char_tags") or "").strip()
     scene_description = (llm_output.get("scene_description") or "").strip()
     shot = str(llm_output.get("shot_size", "medium"))
     angle = str(llm_output.get("camera_angle", "eye_level"))
 
+    # Resolve shot/angle to Animagine-compatible composition tags
+    shot_tag = _SHOT_SIZE_TAGS.get(shot, "")
+    angle_tag = _CAMERA_ANGLE_TAGS.get(angle, "")
+
     parts = [POSITIVE_PREFIX]
 
-    if filtered_char_tags:
-        parts.append(filtered_char_tags)
+    # v2.0: Shot-aware tag ordering — environment-first for non-close-up shots.
+    # In Animagine XL, earlier tags have more weight, so this directly controls
+    # whether the model prioritizes the environment or the character.
+    if shot in ("extreme_long", "long", "full", "medium"):
+        # Environment-first: scene_description (environment tags) before character
+        if scene_description:
+            parts.append(scene_description)
+        if filtered_char_tags:
+            parts.append(filtered_char_tags)
+    else:
+        # Character-first: for close/extreme_close, character IS the focus
+        if filtered_char_tags:
+            parts.append(filtered_char_tags)
+        if scene_description:
+            parts.append(scene_description)
 
-    if scene_description:
-        parts.append(scene_description)
+    # Inject composition tags BEFORE the style suffix
+    if shot_tag:
+        parts.append(shot_tag)
+    if angle_tag:
+        parts.append(angle_tag)
 
     parts.append(POSITIVE_SUFFIX)
 
@@ -201,6 +264,7 @@ def _build_prompt_from_llm(llm_output: dict, char_gender_tag: str) -> PromptPack
     positive = _deduplicate_tags(positive)
 
     # Negative prompt — dynamic per shot
+    # v1.0: extended NEGATIVE_BY_SHOT blocks wrong framing for each shot type
     neg = NEGATIVE_PROMPT
     extra_neg = NEGATIVE_BY_SHOT.get(shot, "")
     if extra_neg:
@@ -216,7 +280,7 @@ def _build_prompt_from_llm(llm_output: dict, char_gender_tag: str) -> PromptPack
 
 
 # ============================================================================
-# Animagine XL 4.0 shot-size mapping (kept for local fallback)
+# Animagine XL 4.0 shot-size / camera-angle mapping
 # ============================================================================
 
 _SHOT_SIZE_TAGS: dict[str, str] = {
@@ -226,6 +290,13 @@ _SHOT_SIZE_TAGS: dict[str, str] = {
     "medium": "medium shot",
     "close": "close-up",
     "extreme_close": "extreme close-up",
+}
+
+_CAMERA_ANGLE_TAGS: dict[str, str] = {
+    "eye_level": "",
+    "high_angle": "from above",
+    "low_angle": "from below",
+    "dutch_angle": "dutch angle",
 }
 
 
@@ -576,16 +647,32 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
 
             for i in range(chunk_len):
                 panel_id = f"{page_id}_p{i + 1:02d}"
-                shots = [ShotSize.LONG, ShotSize.MEDIUM, ShotSize.CLOSE, ShotSize.FULL]
-                shot = shots[panel_counter % len(shots)]
+
+                # v1.0: Context-aware shot selection for local fallback
+                if inputs.pages:
+                    pt = chunk_specs[i][0]
+                    char_for_panel = pt.get("character_id", "")
+                    emotion = float(pt.get("emotion_intensity", 0.5))
+                else:
+                    scene, panel_idx, char_for_panel = chunk_specs[i]
+                    emotion = scene.emotion_intensity
+
+                # No character → establishing shot (extreme_long or long)
+                if not char_for_panel:
+                    shot = ShotSize.EXTREME_LONG if panel_counter % 3 == 0 else ShotSize.LONG
+                # High emotion → close-up
+                elif emotion >= 0.85:
+                    shot = ShotSize.EXTREME_CLOSE if emotion >= 0.95 else ShotSize.CLOSE
+                # Normal character panel → varied distribution
+                else:
+                    shots = [ShotSize.LONG, ShotSize.FULL, ShotSize.MEDIUM, ShotSize.FULL, ShotSize.LONG, ShotSize.MEDIUM]
+                    shot = shots[panel_counter % len(shots)]
                 angle = CameraAngle.EYE_LEVEL
 
                 if inputs.pages:
                     pt = chunk_specs[i][0]
-                    char_for_panel = pt.get("character_id", "")
                     location = pt.get("location", "")
                     atmosphere = pt.get("atmosphere", "")
-                    emotion = float(pt.get("emotion_intensity", 0.5))
                     time_of_day = pt.get("time_of_day", "")
                     scene_description = pt.get("character_action", "") or pt.get("narrative_purpose", "")
                     scene_id = pt.get("panel_id", "")
@@ -598,10 +685,9 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
                             is_thought=pt.get("is_thought", False),
                         )]
                 else:
-                    scene, panel_idx, char_for_panel = chunk_specs[i]
+                    scene, panel_idx, char_for_panel_legacy = chunk_specs[i]
                     location = scene.location
                     atmosphere = scene.atmosphere
-                    emotion = scene.emotion_intensity
                     time_of_day = scene.time_of_day
                     scene_description = scene.actions[0].description if scene.actions else scene.atmosphere
                     scene_id = scene.scene_id
@@ -613,10 +699,13 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
                 if char_for_panel and char_for_panel in char_refs:
                     char_gender_tag = char_refs[char_for_panel].get("gender_tag", "1girl")
 
-                # Build a fake LLM output so _build_prompt_from_llm works
+                # Build a fake LLM output so _build_prompt_from_llm works.
+                # v2.0: environment-first — shot_tag is injected separately by
+                # _build_prompt_from_llm, so scene_description here focuses on
+                # location + atmosphere + character action.
                 fake_llm = {
                     "filtered_char_tags": char_refs.get(char_for_panel, {}).get("core_tags", ""),
-                    "scene_description": f"{_map_shot_size(shot.value)}, {scene_description}, {location}",
+                    "scene_description": f"{location}, {atmosphere}, {time_of_day}, {scene_description}",
                     "shot_size": shot.value,
                     "camera_angle": angle.value,
                 }

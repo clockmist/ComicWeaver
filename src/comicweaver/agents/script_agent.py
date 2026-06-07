@@ -43,13 +43,17 @@ DEFAULT_CHUNK_SIZE = 4  # 每块生成多少页的面板
 
 _PAGINATION_SYSTEM_PROMPT = """You are a comic pagination expert. Divide a developed story into PAGE-LEVEL outlines.
 
+CRITICAL: A comic page is a VISUAL experience. Every page outline must provide rich visual context for the panel writer. The "setting" field is NOT a label — it is a vivid visual description of the environment the reader will SEE.
+
 Each page outline must include:
 - narrative_arc: what story beats this page covers
 - emotional_shift: how emotions change (e.g., "curiosity → tension → shock")
-- key_moment: the single most important narrative beat
+- key_moment: the single most important narrative beat — described as a VISUAL moment
 - key_panel_hint: revelation / confrontation / quiet_moment / action_peak / emotional_climax / transition
 - involved_characters: list of char_ids
-- setting, time_of_day, atmosphere
+- setting: ★ VISUAL DESCRIPTION of the environment — NOT just "street" or "room". Describe what fills the space: architecture, props, lighting conditions, distinctive visual features. Example: "废弃工厂内部，破碎天窗投下光柱，生锈传送带横贯，翻倒货箱和散落零件" NOT "工厂"
+- time_of_day: morning/afternoon/evening/night/dawn/dusk
+- atmosphere: tense/peaceful/oppressive/bright/gloomy/eerie/warm/cold/foggy/rainy/smoky/dusty — what the reader FEELS looking at this page
 - panel_count_hint: 3-6
 - page_note: why this page matters
 
@@ -66,8 +70,8 @@ Return JSON:
       "key_moment": "...",
       "key_panel_hint": "...",
       "involved_characters": ["char_000"],
-      "setting": "...",
-      "time_of_day": "morning/afternoon/evening/night",
+      "setting": "Rich visual environment description here...",
+      "time_of_day": "morning/afternoon/evening/night/dawn/dusk",
       "atmosphere": "...",
       "panel_count_hint": 4,
       "page_note": "..."
@@ -84,6 +88,14 @@ LANGUAGE: {language}. Output ONLY valid JSON object, no markdown, no extra text.
 
 _CHUNK_PANELIZATION_SYSTEM_PROMPT = """You are a panel-level comic script writer. You receive {chunk_size} consecutive page outlines and expand EACH into individual panels.
 
+=== THE MOST IMPORTANT RULE: SCENE-FIRST WRITING ===
+You are writing for a VISUAL medium. Every panel description must answer ONE question:
+"What does the reader actually SEE in this frame?"
+
+A comic panel is NOT a character portrait. It is a VIEW into a world where something is happening.
+- BAD: "林晓在观察周围环境" (describes a character's mental state — invisible to the reader)
+- GOOD: "废弃工厂车间，生锈的传送带横贯画面，破碎的天窗投下条状光线，林晓蹲在翻倒的货箱后，只露出半张脸和一只警惕的眼睛" (describes what the reader SEES)
+
 CRITICAL CONTEXT AWARENESS:
 - These pages are CONSECUTIVE and narratively connected.
 - The "story_so_far" field tells you what happened before this block — use it to maintain continuity.
@@ -97,9 +109,9 @@ For EACH page, return panels with this structure:
       "panel_id": "page_NNN_pNN",
       "page_number": N,
       "order_in_page": 1,
-      "narrative_purpose": "What this panel must accomplish narratively",
-      "character_id": "char_000 or empty string",
-      "character_action": "WHAT the character does (narrative, not visual)",
+      "narrative_purpose": "★ MOST IMPORTANT FIELD. Describe the COMPLETE VISUAL SCENE the reader sees. What fills the frame? Describe: the environment/setting FIRST, then where characters are within that space, what they are physically doing, key props and objects, spatial relationships between elements, lighting and atmosphere. Think like a film storyboard artist, not a novelist. This description will be used to generate the actual image.",
+      "character_id": "char_000 or empty string (empty = no character in this panel)",
+      "character_action": "The character's visible physical action within the scene. If the character is small in the frame or one element among many, keep this brief. Describe BODY LANGUAGE and PHYSICAL MOVEMENT, not thoughts or feelings. Empty if no character.",
       "dialogue_text": "",
       "dialogue_tone": "angry/sad/joyful/fearful/determined/sarcastic/desperate/calm/nervous/cold/warm/curious/urgent",
       "is_thought": false,
@@ -107,9 +119,9 @@ For EACH page, return panels with this structure:
       "emotion": "tension/sorrow/joy/fear/determination/surprise/anger/calm/hope/despair/wonder/dread",
       "emotion_intensity": 0.7,
       "is_key_panel": false,
-      "location": "...",
-      "time_of_day": "morning/afternoon/evening/night",
-      "atmosphere": "tense/peaceful/oppressive/bright/gloomy/eerie/warm/cold"
+      "location": "★ BE SPECIFIC. Not just 'street' but 'narrow alley between towering scrap-metal walls, oil drums scattered, flickering neon sign overhead'. This field provides critical visual context.",
+      "time_of_day": "morning/afternoon/evening/night/dawn/dusk",
+      "atmosphere": "tense/peaceful/oppressive/bright/gloomy/eerie/warm/cold/foggy/rainy/smoky/dusty"
     }}
   ]
 }}
@@ -124,13 +136,35 @@ Return a single JSON object with a "pages" key containing the array of expanded 
 
 RULES:
 1. Generate EXACTLY the requested number of panels per page (from panel_count_hint).
-2. Pages in this block must feel CONNECTED — emotional arcs should flow across page boundaries.
+2. Pages in this block must feel CONNECTED — visual and emotional arcs should flow across page boundaries.
 3. The LAST page of the block should end with narrative momentum (hook for next block).
 4. EXACTLY ONE panel per page has is_key_panel=true.
 5. Spread dialogue naturally across panels in a page.
 6. Use character_id from designs; empty string for no-character panels.
 7. panel_id format: page_NNN_pNN (e.g. page_001_p01, page_001_p02).
-8. LANGUAGE: {language}. Output ONLY valid JSON object, no markdown, no extra text."""
+8. LANGUAGE: {language}. Output ONLY valid JSON object, no markdown, no extra text.
+
+=== SCENE-FIRST WRITING EXAMPLES ===
+
+BAD narrative_purpose (character-centric, no visual information):
+  "林晓决定跟踪那个可疑的人"
+  "角色表达愤怒和决心"
+  "展示主角的内心挣扎"
+These are INVISIBLE to the reader. They describe thoughts, not images.
+
+GOOD narrative_purpose (scene-first, visually concrete):
+  "雨夜后巷，积水倒映着霓虹招牌的红色光晕，一个穿风衣的模糊人影在巷口闪过，林晓在二十米外的消防梯阴影下，手按在腰间的刀柄上，呼吸凝成白雾"
+  "废弃工厂内部，阳光从破碎的屋顶斜射下来形成光柱，粉尘在光中悬浮，林晓跪在倒塌的机器旁，双手扒开瓦砾，露出下面一只苍白的手"
+  "拥挤的夜市街道，摊位灯笼连成暖色光带，人群熙攘，林晓站在鱼摊前，身后的玻璃鱼缸映出一个戴兜帽的人正在接近她"
+
+=== COMIC PANEL VARIETY (CRITICAL) ===
+Comics tell stories through varied visual rhythm. Do NOT make every panel character-focused.
+- First panel of each page SHOULD be an establishing/location shot: set character_id="" or include rich environment description that dwarfs the character. This orients the reader.
+- ~15-25% of panels SHOULD have character_id="" — pure environment, atmosphere, or transition panels. These create breathing room and visual variety.
+- For character panels: the character should be shown IN CONTEXT, not in isolation. Show the environment they inhabit, the objects around them, the space they move through.
+- Use narration panels (character_id="", narration filled) for story exposition and pacing.
+- NOT every panel needs dialogue — silent/reaction panels are powerful comic techniques.
+- Vary panel density: some pages can have 3 panels (slower, more atmospheric), others 5-6 (faster, action-heavy)."""
 
 
 # ============================================================================
