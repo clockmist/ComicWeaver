@@ -447,6 +447,9 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
                         is_thought=pt.get("is_thought", False),
                     )]
                 return []
+            def _pt_narration(item):
+                pt = item[0]
+                return pt.get("narration", "") if not pt.get("dialogue_text", "") else ""
             def _pt_action_heavy(_chunk_designs):
                 return any(len(item.get("character_action", "")) > 30 for item, _ in chunk_source_items)
         else:
@@ -549,6 +552,7 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
                         prompt_pack=prompt_pack,
                         dialogues_in_panel=panel_dialogues,
                         speech_bubble_hints=bubble_hints,
+                        narration=_pt_narration(si),
                         pose_hint=scene_description,
                         expression="",
                         scene_lighting="",
@@ -684,6 +688,7 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
                             tone=pt.get("dialogue_tone", "neutral"),
                             is_thought=pt.get("is_thought", False),
                         )]
+                    narration_text = pt.get("narration", "") if not pt.get("dialogue_text", "") else ""
                 else:
                     scene, panel_idx, char_for_panel_legacy = chunk_specs[i]
                     location = scene.location
@@ -694,6 +699,7 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
                     dialogues_for_panel = _distribute_dialogues(
                         scene.dialogues, panel_idx, scene.panel_hint
                     )
+                    narration_text = ""
 
                 char_gender_tag = "1girl"
                 if char_for_panel and char_for_panel in char_refs:
@@ -729,6 +735,7 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
                         emotion_intensity=emotion,
                         prompt_pack=prompt_pack,
                         dialogues_in_panel=list(dialogues_for_panel),
+                        narration=narration_text,
                         pose_hint=scene_description,
                         expression="",
                         scene_lighting="",

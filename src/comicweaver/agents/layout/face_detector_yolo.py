@@ -3,6 +3,8 @@
 使用 face_yolov8n.pt 检测黑白漫画面板中的人脸，
 返回归一化的 FaceRegion 列表。
 
+模型路径通过 configs/comicweaver.yaml 的 yolo.model_path 配置。
+
 与 face_detector.py 的关系：
 - face_detector.py 保留不动（含 FaceRegion、optimize_bubble_positions、detect_faces_vlm）
 - 本模块是新增的 YOLO 后端，输出同格式的 FaceRegion
@@ -18,31 +20,36 @@ from .face_detector import FaceRegion
 logger = logging.getLogger(__name__)
 
 _MODEL = None
-_MODEL_NAME = "face_yolov8n.pt"
+_MODEL_PATH = None
 
 
-def _get_model():
-    """懒加载 YOLO 模型（全局单例）。"""
-    global _MODEL
-    if _MODEL is None:
+def _get_model(model_path: str):
+    """懒加载 YOLO 模型（按路径单例）。"""
+    global _MODEL, _MODEL_PATH
+    if _MODEL is None or _MODEL_PATH != model_path:
         from ultralytics import YOLO
 
-        # 模型路径：项目根目录 yolo/
-        model_path = (
-            Path(__file__).parent.parent.parent.parent.parent / "yolo" / _MODEL_NAME
-        )
-        logger.info("加载 YOLO 人脸检测模型: %s", model_path)
         _MODEL = YOLO(str(model_path))
+        _MODEL_PATH = model_path
+        logger.info("加载 YOLO 人脸检测模型: %s", model_path)
     return _MODEL
 
 
-async def detect_faces_yolo(image_path: str) -> list[FaceRegion]:
+async def detect_faces_yolo(
+    image_path: str,
+    model_path: str = "yolo/face_yolov8n.pt",
+    confidence_threshold: float = 0.3,
+) -> list[FaceRegion]:
     """使用 YOLO 检测人脸，返回归一化 FaceRegion 列表。
 
     参数
     ----------
     image_path : str
         面板图像的本地路径。
+    model_path : str
+        YOLO 模型文件路径（相对于项目根目录或绝对路径）。
+    confidence_threshold : float
+        最低置信度阈值（0.0~1.0），低于此值的检测结果被丢弃。
 
     返回
     -------
@@ -51,7 +58,13 @@ async def detect_faces_yolo(image_path: str) -> list[FaceRegion]:
         无人脸或检测失败时返回空列表。
     """
     try:
-        model = _get_model()
+        # 解析模型路径：相对路径 → 相对于项目根目录
+        model_p = Path(model_path)
+        if not model_p.is_absolute():
+            model_p = (
+                Path(__file__).parent.parent.parent.parent.parent / model_path
+            )
+        model = _get_model(str(model_p))
         results = await asyncio.to_thread(model, str(image_path), verbose=False)
 
         faces: list[FaceRegion] = []
@@ -62,11 +75,11 @@ async def detect_faces_yolo(image_path: str) -> list[FaceRegion]:
             for box in r.boxes:
                 x1, y1, x2, y2 = box.xyxy[0].tolist()
                 conf = float(box.conf[0])
-                if conf < 0.3:  # 低置信度过滤
+                if conf < confidence_threshold:
                     continue
                 faces.append(
                     FaceRegion(
-                        x=x1 / orig_w,  # 归一化到 0-1
+                        x=x1 / orig_w,
                         y=y1 / orig_h,
                         w=(x2 - x1) / orig_w,
                         h=(y2 - y1) / orig_h,
@@ -75,7 +88,7 @@ async def detect_faces_yolo(image_path: str) -> list[FaceRegion]:
         return faces
 
     except FileNotFoundError:
-        logger.warning("YOLO 模型文件未找到，跳过人脸检测")
+        logger.warning("YOLO 模型文件未找到: %s，跳过人脸检测", model_path)
         return []
     except Exception as exc:
         logger.warning("YOLO 人脸检测失败 (%s)，回退到纯启发式放置", exc)

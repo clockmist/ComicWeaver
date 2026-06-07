@@ -160,10 +160,16 @@ class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
         if not tasks:
             return {}
 
-        # 并行 YOLO 检测
-        logger.info("开始 YOLO 人脸检测: %d 个面板", len(tasks))
+        # 并行 YOLO 检测（从 config 读取模型路径和置信度）
+        yolo_cfg = getattr(self.config, "yolo", None)
+        model_path = yolo_cfg.model_path if yolo_cfg else "yolo/face_yolov8n.pt"
+        confidence = yolo_cfg.confidence_threshold if yolo_cfg else 0.3
+        logger.info("开始 YOLO 人脸检测: %d 个面板 (model=%s)", len(tasks), model_path)
         results = await asyncio.gather(
-            *[detect_faces_yolo(path) for path in tasks.values()],
+            *[
+                detect_faces_yolo(path, model_path=model_path, confidence_threshold=confidence)
+                for path in tasks.values()
+            ],
             return_exceptions=True,
         )
 

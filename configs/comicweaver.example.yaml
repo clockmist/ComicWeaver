@@ -28,3 +28,7 @@ storage:
 runtime:
   fallback_to_local: true
   request_retries: 1
+
+yolo:
+  model_path: "yolo/face_yolov8n.pt"
+  confidence_threshold: 0.3

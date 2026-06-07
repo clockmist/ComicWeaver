@@ -101,29 +101,96 @@ CRITICAL CONTEXT AWARENESS:
 - The "story_so_far" field tells you what happened before this block — use it to maintain continuity.
 - The last page of this block should set up a smooth transition to the next block (if there is one).
 
-For EACH page, return panels with this structure:
+For EACH page, return panels with this structure.
+
+=== DIALOGUE & NARRATION RULES (CRITICAL — READ THIS FIRST) ===
+
+COMIC STORYTELLING IS DRIVEN BY WORDS AND IMAGES TOGETHER.
+Dialogue and narration are NOT optional decoration — they ARE the story.
+A comic with empty bubbles is a broken comic.
+
+DIALOGUE RULES (character panels):
+- EVERY character panel where the character is visible and engaged SHOULD have dialogue.
+- Dialogue should be NATURAL and SUBSTANTIAL — 1 to 3 full sentences, not one-word grunts.
+- Characters should sound like real people talking: incomplete sentences, emotional outbursts, questions, interruptions are all valid.
+- Write dialogue that REVEALS CHARACTER — what they say and HOW they say it tells the reader who they are.
+- When multiple characters are in a scene, create CONVERSATION — back-and-forth exchanges across consecutive panels.
+- ONLY leave dialogue_text empty for: true silent reaction panels (shock without words), pure action panels (character mid-combat/mid-chase), or establishing shots where the character is tiny in the frame.
+- "dialogue_text" MUST be the character's exact spoken words — NO "name:" prefix, NO quotation marks around the entire line.
+
+NARRATION RULES (no-character panels):
+- EVERY no-character panel (character_id="") MUST have narration filled.
+- Narration serves as the "voice-over" of the comic — it provides context, foreshadowing, internal monologue, or atmospheric description.
+- Narration should be 1-2 full sentences, written in a literary/narrative style.
+- Narration panels are the STORYTELLER'S VOICE — use them to set mood, reveal backstory, or bridge scenes.
+- Exception: the very first panel of each page can be a pure establishing shot without narration if the visuals alone set the scene.
+
+DENSITY REQUIREMENT:
+- At least 60% of ALL panels across the story MUST have either dialogue_text OR narration filled.
+- A page with 4 panels should typically have 3 panels with text (dialogue or narration).
+- Consecutive silent panels are ONLY allowed during pure action sequences.
+
+Example — character panel WITH dialogue (note: multi-sentence, natural speech):
 {{
+  "panel_id": "page_NNN_pNN",
   "page_number": N,
-  "panels": [
-    {{
-      "panel_id": "page_NNN_pNN",
-      "page_number": N,
-      "order_in_page": 1,
-      "narrative_purpose": "★ MOST IMPORTANT FIELD. Describe the COMPLETE VISUAL SCENE the reader sees. What fills the frame? Describe: the environment/setting FIRST, then where characters are within that space, what they are physically doing, key props and objects, spatial relationships between elements, lighting and atmosphere. Think like a film storyboard artist, not a novelist. This description will be used to generate the actual image.",
-      "character_id": "char_000 or empty string (empty = no character in this panel)",
-      "character_action": "The character's visible physical action within the scene. If the character is small in the frame or one element among many, keep this brief. Describe BODY LANGUAGE and PHYSICAL MOVEMENT, not thoughts or feelings. Empty if no character.",
-      "dialogue_text": "",
-      "dialogue_tone": "angry/sad/joyful/fearful/determined/sarcastic/desperate/calm/nervous/cold/warm/curious/urgent",
-      "is_thought": false,
-      "narration": "",
-      "emotion": "tension/sorrow/joy/fear/determination/surprise/anger/calm/hope/despair/wonder/dread",
-      "emotion_intensity": 0.7,
-      "is_key_panel": false,
-      "location": "★ BE SPECIFIC. Not just 'street' but 'narrow alley between towering scrap-metal walls, oil drums scattered, flickering neon sign overhead'. This field provides critical visual context.",
-      "time_of_day": "morning/afternoon/evening/night/dawn/dusk",
-      "atmosphere": "tense/peaceful/oppressive/bright/gloomy/eerie/warm/cold/foggy/rainy/smoky/dusty"
-    }}
-  ]
+  "order_in_page": 1,
+  "narrative_purpose": "废弃工厂车间，生锈传送带横贯画面，林晓从翻倒货箱后站起身，表情凝重地看向远方",
+  "character_id": "char_001",
+  "character_action": "从货箱后站起身，拍掉膝盖上的灰尘，目光直视前方",
+  "dialogue_text": "这个地方……已经没什么可留恋的了。我明天一早就走。",
+  "dialogue_tone": "determined",
+  "is_thought": false,
+  "narration": "",
+  "emotion": "determination",
+  "emotion_intensity": 0.7,
+  "is_key_panel": false,
+  "location": "废弃工厂内部，破碎天窗投下光柱，生锈机器和散落零件",
+  "time_of_day": "afternoon",
+  "atmosphere": "tense"
+}}
+
+Example — consecutive character panels showing CONVERSATION (back-and-forth dialogue):
+Panel 1:
+{{
+  "panel_id": "page_NNN_p01",
+  "character_id": "char_001",
+  "dialogue_text": "你终于来了。我等了你整整三个小时。",
+  "dialogue_tone": "cold"
+}}
+Panel 2:
+{{
+  "panel_id": "page_NNN_p02",
+  "character_id": "char_002",
+  "dialogue_text": "抱歉。路上遇到了点麻烦——有人跟踪我，我绕了远路。",
+  "dialogue_tone": "nervous"
+}}
+Panel 3:
+{{
+  "panel_id": "page_NNN_p03",
+  "character_id": "char_001",
+  "dialogue_text": "跟踪？你还记得那个人长什么样吗？",
+  "dialogue_tone": "urgent"
+}}
+
+Example — no-character panel WITH narration (1-2 full sentences):
+{{
+  "panel_id": "page_NNN_pNN",
+  "page_number": N,
+  "order_in_page": 2,
+  "narrative_purpose": "雨夜的城市街道，霓虹灯倒映在积水里，远处有车灯闪过，空无一人的巷口只有风吹动的塑料袋",
+  "character_id": "",
+  "character_action": "",
+  "dialogue_text": "",
+  "dialogue_tone": "calm",
+  "is_thought": false,
+  "narration": "这座城市的夜晚从不真正安静。每一条暗巷里都藏着不愿被人知晓的秘密，而今晚，又多了一个。",
+  "emotion": "dread",
+  "emotion_intensity": 0.5,
+  "is_key_panel": false,
+  "location": "夜晚的城市街道，霓虹灯和积水",
+  "time_of_day": "night",
+  "atmosphere": "gloomy"
 }}
 
 Return a single JSON object with a "pages" key containing the array of expanded pages:
@@ -139,10 +206,11 @@ RULES:
 2. Pages in this block must feel CONNECTED — visual and emotional arcs should flow across page boundaries.
 3. The LAST page of the block should end with narrative momentum (hook for next block).
 4. EXACTLY ONE panel per page has is_key_panel=true.
-5. Spread dialogue naturally across panels in a page.
+5. ★ DIALOGUE DENSITY: At least 60% of all panels MUST have dialogue_text or narration filled. For a 4-panel page, at least 3 panels should contain text. Character panels without dialogue should be rare (<20% of character panels). Create genuine CONVERSATIONS across consecutive panels — characters talking to each other, not isolated one-liners.
 6. Use character_id from designs; empty string for no-character panels.
 7. panel_id format: page_NNN_pNN (e.g. page_001_p01, page_001_p02).
-8. LANGUAGE: {language}. Output ONLY valid JSON object, no markdown, no extra text.
+8. Follow the DIALOGUE & NARRATION RULES above strictly: character present → fill dialogue_text (multi-sentence, natural speech); no character → fill narration (1-2 full sentences). Never fill both in one panel.
+9. LANGUAGE: {language}. Output ONLY valid JSON object, no markdown, no extra text.
 
 === SCENE-FIRST WRITING EXAMPLES ===
 
@@ -157,13 +225,13 @@ GOOD narrative_purpose (scene-first, visually concrete):
   "废弃工厂内部，阳光从破碎的屋顶斜射下来形成光柱，粉尘在光中悬浮，林晓跪在倒塌的机器旁，双手扒开瓦砾，露出下面一只苍白的手"
   "拥挤的夜市街道，摊位灯笼连成暖色光带，人群熙攘，林晓站在鱼摊前，身后的玻璃鱼缸映出一个戴兜帽的人正在接近她"
 
-=== COMIC PANEL VARIETY (CRITICAL) ===
-Comics tell stories through varied visual rhythm. Do NOT make every panel character-focused.
-- First panel of each page SHOULD be an establishing/location shot: set character_id="" or include rich environment description that dwarfs the character. This orients the reader.
-- ~15-25% of panels SHOULD have character_id="" — pure environment, atmosphere, or transition panels. These create breathing room and visual variety.
-- For character panels: the character should be shown IN CONTEXT, not in isolation. Show the environment they inhabit, the objects around them, the space they move through.
-- Use narration panels (character_id="", narration filled) for story exposition and pacing.
-- NOT every panel needs dialogue — silent/reaction panels are powerful comic techniques.
+=== COMIC PANEL VARIETY ===
+Comics tell stories through varied visual rhythm, but TEXT carries the narrative forward.
+- First panel of each page SHOULD be an establishing/location shot: set character_id="" with narration, or include rich environment description with the character. This orients the reader.
+- ~10-20% of panels MAY be pure environment/atmosphere shots (character_id="") — these MUST have narration filled.
+- The MAJORITY of panels (~70%) should feature characters WITH dialogue — this is a character-driven comic.
+- For character panels: show the character IN CONTEXT, with their environment. Dialogue reveals personality.
+- Silent/reaction panels are SPECIAL tools — use sparingly (1-2 per page max), only for moments of genuine emotional impact or fast action.
 - Vary panel density: some pages can have 3 panels (slower, more atmospheric), others 5-6 (faster, action-heavy)."""
 
 

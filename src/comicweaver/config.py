@@ -77,12 +77,19 @@ class RuntimeConfig(BaseModel):
     request_retries: int = 1
 
 
+class YoloConfig(BaseModel):
+    """YOLO face detection model configuration."""
+    model_path: str = "yolo/face_yolov8n.pt"
+    confidence_threshold: float = 0.3
+
+
 class AppConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     vlm: VLMConfig = Field(default_factory=VLMConfig)
     image: ImageConfig = Field(default_factory=ImageConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    yolo: YoloConfig = Field(default_factory=YoloConfig)
 
 
 def _coerce_bool(value: str) -> bool:
@@ -159,6 +166,9 @@ def _apply_env(data: dict[str, Any]) -> None:
         # Runtime
         "COMICWEAVER_FALLBACK_TO_LOCAL": ("runtime.fallback_to_local", _coerce_bool),
         "COMICWEAVER_REQUEST_RETRIES": ("runtime.request_retries", int),
+        # YOLO
+        "COMICWEAVER_YOLO_MODEL_PATH": ("yolo.model_path", str),
+        "COMICWEAVER_YOLO_CONFIDENCE": ("yolo.confidence_threshold", float),
     }
     for env_key, (config_key, caster) in mapping.items():
         raw = os.getenv(env_key)

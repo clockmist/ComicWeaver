@@ -268,14 +268,15 @@ def calculate_bubble_size(
     page_height_px: int = 1754,
     margin_px: int = 40,
 ) -> tuple[float, float, int]:
-    """根据面板大小、景别和情感强度计算气泡的归一化尺寸和字号。
+    """根据面板大小、景别和情感强度计算椭圆气泡尺寸和字号。
 
-    返回 (w_norm, h_norm, font_size_pt)，其中 w_norm/h_norm 是相对整页的归一化值。
+    策略：按字号确定每行约 8 个 CJK 字 → 换行测量 → 按椭圆可用面积（75%）
+    换算椭圆外框 → 约束宽高比（1.3:1 ~ 4.0:1）→ +5% 呼吸空间。
     """
     inner_w = page_width_px - margin_px * 2
     inner_h = page_height_px - margin_px * 2
 
-    # 面板像素面积（基于归一化 bbox 换算）
+    # 面板像素面积
     panel_w_px = panel_bbox.width * inner_w
     panel_h_px = panel_bbox.height * inner_h
     panel_area_px = panel_w_px * panel_h_px
@@ -286,7 +287,7 @@ def calculate_bubble_size(
     base_font = 18 + int(area_ratio * 32)
     base_font = max(16, min(34, base_font))
 
-    # 情感加成：高情感 → 更大字体（shout 类）
+    # 情感加成
     if emotion_intensity >= 0.85:
         base_font += 6
     elif emotion_intensity >= 0.70:
@@ -298,12 +299,35 @@ def calculate_bubble_size(
     base_font = int(base_font * multiplier)
     base_font = max(14, min(38, base_font))
 
-    # 按字体大小估算文字像素尺寸
-    text_w, text_h = estimate_text_size(text, base_font, max_width_px=450)
+    # Step 1: 按字号确定文本换行宽度（每行约 8 个 CJK 字）
+    text_max_w = int(base_font * 8)
+    text_max_w = max(120, min(260, text_max_w))
+
+    # Step 2: 换行测量
+    text_w_px, text_h_px = estimate_text_size(text, base_font, max_width_px=text_max_w)
+
+    # Step 3: 椭圆外框 = 文本 / 0.75（文本占椭圆 75%，inset ~12.5% 各边）
+    ellipse_w = int(text_w_px / 0.75)
+    ellipse_h = int(text_h_px / 0.75)
+
+    # Step 4: 约束宽高比 1.3:1 ~ 4.0:1
+    aspect = ellipse_w / max(ellipse_h, 1)
+    if aspect > 4.0:
+        ellipse_h = int(ellipse_w / 2.8)
+    elif aspect < 1.3:
+        ellipse_w = int(ellipse_h * 1.7)
+
+    # Step 5: 呼吸空间 +5%
+    ellipse_w = int(ellipse_w * 1.05)
+    ellipse_h = int(ellipse_h * 1.05)
+
+    # Step 6: 最小/最大约束
+    ellipse_w = max(100, min(ellipse_w, inner_w - 20))
+    ellipse_h = max(60, min(ellipse_h, inner_h - 20))
 
     # 归一化
-    w_norm = text_w / max(inner_w, 1)
-    h_norm = text_h / max(inner_h, 1)
+    w_norm = ellipse_w / max(inner_w, 1)
+    h_norm = ellipse_h / max(inner_h, 1)
 
     return w_norm, h_norm, base_font
 
@@ -481,9 +505,19 @@ def place_bubbles(
 
     all_bubbles: list[BubblePlacement] = []
 
+    # 旁白位置：紧贴四个角落
+    _NARRATION_CORNERS: list[tuple[float, float]] = [
+        (0.02, 0.84),   # bottom_left  — 紧贴左下角
+        (0.60, 0.84),   # bottom_right — 紧贴右下角
+        (0.02, 0.02),   # top_left    — 紧贴左上角
+        (0.60, 0.02),   # top_right   — 紧贴右上角
+    ]
+
     for panel, bbox in zip(panels, panel_bboxes, strict=False):
         dialogues = panel.dialogues_in_panel
-        if not dialogues:
+        narration_text = getattr(panel, "narration", "") or ""
+
+        if not dialogues and not narration_text:
             continue
 
         # 该面板的人脸检测结果
@@ -551,6 +585,60 @@ def place_bubbles(
                     font_size_pt=bubble_font_pt,
                     occlusion_score=0.0,
                     tail_direction=tail_dir,
+                    style=style,
+                )
+            )
+
+        # ---- 旁白处理 ----
+        if narration_text:
+            # 旁白用固定适中的字号，不参与自适应
+            narr_w_px, narr_h_px = estimate_text_size(
+                narration_text, font_size_pt=16, max_width_px=300,
+            )
+            # 旁白方框尺寸 = 文本 + 内边距
+            narr_w_px = int(narr_w_px * 1.2)
+            narr_h_px = int(narr_h_px * 1.2)
+            w_norm = narr_w_px / max(inner_w, 1)
+            h_norm = narr_h_px / max(inner_h, 1)
+
+            # 放置到不受气泡干扰的角落（优先 bottom_left）
+            best_corner = _NARRATION_CORNERS[0]
+            for cx_ratio, cy_ratio in _NARRATION_CORNERS:
+                cx = bbox.x + bbox.width * cx_ratio
+                cy = bbox.y + bbox.height * cy_ratio
+                # 钳制在面板内
+                cx = max(bbox.x + 0.01, min(cx, bbox.x + bbox.width - w_norm - 0.01))
+                cy = max(bbox.y + 0.01, min(cy, bbox.y + bbox.height - h_norm - 0.01))
+                # 避开已有对话气泡
+                for existing in all_bubbles:
+                    if existing.panel_id != panel.panel_id:
+                        continue
+                    # 简单重叠检测
+                    overlap_x = abs(cx - existing.x) < (w_norm + existing.w) * 0.6
+                    overlap_y = abs(cy - existing.y) < (h_norm + existing.h) * 0.6
+                    if overlap_x and overlap_y:
+                        break
+                else:
+                    best_corner = (cx, cy)
+                    break
+
+            narr_area_px = (w_norm * inner_w) * (h_norm * inner_h)
+            style = bubble_style_params("narration", narr_area_px)
+
+            all_bubbles.append(
+                BubblePlacement(
+                    panel_id=panel.panel_id,
+                    dialogue_index=num_dialogues,  # 排在对话之后
+                    bubble_type="narration",
+                    speaker="",
+                    text=narration_text,
+                    x=best_corner[0],
+                    y=best_corner[1],
+                    w=w_norm,
+                    h=h_norm,
+                    font_size_pt=16,
+                    occlusion_score=0.0,
+                    tail_direction="auto",
                     style=style,
                 )
             )

@@ -447,34 +447,26 @@ def _draw_speech(
     bp: "BubblePlacement",
     font_size_pt: int = 14,
 ) -> None:
-    """Rounded rectangle speech bubble with triangular tail."""
+    """Elliptical speech bubble (no tail)."""
     x1, y1, x2, y2 = body
 
-    # 从 bp.style 读取样式参数，兜底默认值
     style: dict = getattr(bp, 'style', None) or {}
-    radius = style.get("radius", 12)
     border = style.get("border", 2)
     outline = tuple(style.get("outline", (20, 20, 20)))
     fill = tuple(style.get("fill", (255, 255, 255)))
-    tail_size = style.get("tail", _TAIL_SIZE)
     effective_font = getattr(bp, 'font_size_pt', font_size_pt) or font_size_pt
 
-    tail = _tail_polygon(body, bp.tail_direction, tail_size)
-
-    # Draw tail first (filled, no outline)
-    draw.polygon(tail, fill=fill)
-
-    # Bubble body
-    draw.rounded_rectangle(
-        (x1, y1, x2, y2), radius=radius,
+    # Elliptical bubble body
+    draw.ellipse(
+        (x1, y1, x2, y2),
         fill=fill, outline=outline, width=border,
     )
 
-    # Tail outline — draw the two edges of the triangle that aren't on the bubble
-    _draw_tail_outline(draw, tail, body, outline_color=outline, border_width=border)
-
-    # Text
-    _draw_bubble_text(draw, bp, x1, y1, x2, y2, font_size_pt=effective_font)
+    # Text area: inset ~12.5% from ellipse edge to stay within curve
+    inset_x = int((x2 - x1) * 0.12)
+    inset_y = int((y2 - y1) * 0.12)
+    _draw_bubble_text(draw, bp, x1 + inset_x, y1 + inset_y,
+                      x2 - inset_x, y2 - inset_y, font_size_pt=effective_font)
 
 
 def _draw_tail_outline(
@@ -496,6 +488,21 @@ def _draw_tail_outline(
             draw.line([a, b], fill=outline_color, width=border_width)
 
 
+def _draw_ellipse_tail_outline(
+    draw: ImageDraw.ImageDraw,
+    tail: list[tuple[int, int]],
+    outline_color: tuple[int, int, int] = (20, 20, 20),
+    border_width: int = 2,
+) -> None:
+    """Draw the two free edges of the tail for ellipse bubbles.
+
+    Base edge (tail[0]→tail[1]) sits on the ellipse body and is covered by it;
+    only the two edges from base to tip (tail[0]→tail[2], tail[1]→tail[2]) need outlines.
+    """
+    draw.line([tail[0], tail[2]], fill=outline_color, width=border_width)
+    draw.line([tail[1], tail[2]], fill=outline_color, width=border_width)
+
+
 # ---------------------------------------------------------------------------
 # Thought bubble — rounded rect + small circles (cloud outline)
 # ---------------------------------------------------------------------------
@@ -507,18 +514,16 @@ def _draw_thought(
     bg_color: tuple[int, int, int],
     font_size_pt: int = 14,
 ) -> None:
-    """Cloud-like thought bubble: rounded rect + circles along the bottom."""
+    """Cloud-like thought bubble: elliptical body + small circles."""
     x1, y1, x2, y2 = body
 
     style: dict = getattr(bp, 'style', None) or {}
-    radius = style.get("radius", 16)
     border = style.get("border", 2)
-    outline = tuple(style.get("outline", (180, 180, 200)))
+    outline = tuple(style.get("outline", (20, 20, 20)))
     fill = tuple(style.get("fill", (255, 255, 255)))
     effective_font = getattr(bp, 'font_size_pt', font_size_pt) or font_size_pt
 
     r = _THOUGHT_DOT_R
-    # Dot positions: leading from the bubble toward the panel centre
     tail_dir = bp.tail_direction or "down"
     dots = _thought_dot_positions(body, tail_dir)
 
@@ -527,13 +532,17 @@ def _draw_thought(
         draw.ellipse((dx - r, dy - r, dx + r, dy + r),
                      fill=fill, outline=outline, width=1)
 
-    # Bubble body (draw after dots so it covers overlapping dot edges)
-    draw.rounded_rectangle(
-        (x1, y1, x2, y2), radius=radius,
+    # Elliptical bubble body (draw after dots so it covers overlapping dot edges)
+    draw.ellipse(
+        (x1, y1, x2, y2),
         fill=fill, outline=outline, width=border,
     )
 
-    _draw_bubble_text(draw, bp, x1, y1, x2, y2, font_size_pt=effective_font)
+    # Text inset for ellipse
+    inset_x = int((x2 - x1) * 0.12)
+    inset_y = int((y2 - y1) * 0.12)
+    _draw_bubble_text(draw, bp, x1 + inset_x, y1 + inset_y,
+                      x2 - inset_x, y2 - inset_y, font_size_pt=effective_font)
 
 
 def _thought_dot_positions(
@@ -573,22 +582,20 @@ def _draw_shout(
     bg_color: tuple[int, int, int],
     font_size_pt: int = 14,
 ) -> None:
-    """Jagged / spiky shout bubble for intense dialogue."""
+    """Jagged / spiky shout bubble for intense dialogue (no tail)."""
     x1, y1, x2, y2 = body
 
     style: dict = getattr(bp, 'style', None) or {}
-    outline = tuple(style.get("outline", (200, 40, 40)))
-    fill = tuple(style.get("fill", (255, 255, 240)))
+    outline = tuple(style.get("outline", (20, 20, 20)))
+    fill = tuple(style.get("fill", (255, 255, 255)))
     border = style.get("border", 2)
-    tail_size = style.get("tail", _TAIL_SIZE)
     effective_font = getattr(bp, 'font_size_pt', font_size_pt) or font_size_pt
 
     # Generate jagged outline points
     points = _jagged_outline(x1, y1, x2, y2, amplitude=6, frequency=8)
-    tail_pts = _tail_polygon(body, bp.tail_direction, tail_size)
 
-    # Draw filled polygon (body + tail)
-    draw.polygon(points + tail_pts, fill=fill, outline=outline, width=border)
+    # Draw filled polygon (body only)
+    draw.polygon(points, fill=fill, outline=outline, width=border)
 
     _draw_bubble_text(draw, bp, x1 + 6, y1 + 6, x2 - 6, y2 - 6, font_size_pt=effective_font)
 
@@ -648,29 +655,27 @@ def _draw_whisper(
     bg_color: tuple[int, int, int],
     font_size_pt: int = 14,
 ) -> None:
-    """Dashed-border whisper bubble for quiet / secretive dialogue."""
+    """Elliptical whisper bubble with thin, light outline."""
     x1, y1, x2, y2 = body
 
     style: dict = getattr(bp, 'style', None) or {}
-    radius = style.get("radius", 12)
     border = style.get("border", 1)
-    outline = tuple(style.get("outline", (140, 140, 160)))
-    fill = tuple(style.get("fill", (250, 250, 255)))
+    outline = tuple(style.get("outline", (20, 20, 20)))
+    fill = tuple(style.get("fill", (255, 255, 255)))
     effective_font = getattr(bp, 'font_size_pt', font_size_pt) or font_size_pt
-    # 派生文字颜色：outline 加深一点
     text_color = tuple(max(0, c - 40) for c in outline)
 
-    # Fill
-    draw.rounded_rectangle(
-        (x1, y1, x2, y2), radius=radius,
-        fill=fill,
+    # Elliptical body with thin outline
+    draw.ellipse(
+        (x1, y1, x2, y2),
+        fill=fill, outline=outline, width=border,
     )
-    # Dashed outline — draw as short line segments
-    _draw_dashed_rounded_rect(draw, x1, y1, x2, y2, radius=radius,
-                              dash_len=6, gap_len=4,
-                              color=outline, width=border)
 
-    _draw_bubble_text(draw, bp, x1, y1, x2, y2, text_color=text_color, font_size_pt=effective_font)
+    inset_x = int((x2 - x1) * 0.12)
+    inset_y = int((y2 - y1) * 0.12)
+    _draw_bubble_text(draw, bp, x1 + inset_x, y1 + inset_y,
+                      x2 - inset_x, y2 - inset_y,
+                      text_color=text_color, font_size_pt=effective_font)
 
 
 def _draw_dashed_rounded_rect(

@@ -414,6 +414,7 @@ class PanelPlan(BaseModel):
     prompt_pack: PromptPack = Field(default_factory=PromptPack)
     dialogues_in_panel: list[Dialogue] = Field(default_factory=list)
     speech_bubble_hints: list[BubbleHint] = Field(default_factory=list)
+    narration: str = ""            # 旁白文字（无角色面板的叙述性文字）
     # LLM 生成的分镜细节（StoryboardAgent 通过 LLM 设计）
     pose_hint: str = ""          # 角色身体姿势描述
     expression: str = ""         # 角色面部表情
