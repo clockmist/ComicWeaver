@@ -35,10 +35,8 @@ from .layout import (
     PanelSlot,
     compose_page,
     normalize_weights,
-    place_bubbles,
     solve_layout,
 )
-from .layout.face_detector import detect_faces_vlm
 from .layout.solver import apply_gutters
 from .layout.templates import LayoutHint
 
@@ -85,31 +83,12 @@ class LayoutAgent(BaseAgent[LayoutInput, LayoutOutput]):
     async def run(self, inputs: LayoutInput, context: AgentContext) -> LayoutOutput:
         await self._sleep_for_demo(0.2)
 
-        # Pre-detect faces via VLM (async, parallel per panel)
-        faces_by_panel: dict[str, list] = {}
-        if self.config.vlm.is_available:
-            for page in inputs.pages:
-                for panel in page.panels:
-                    pi = inputs.panel_images.get(panel.panel_id)
-                    if pi and panel.dialogues_in_panel:
-                        try:
-                            face_data = await detect_faces_vlm(
-                                pi.image_path, self.config.vlm,
-                            )
-                            if face_data:
-                                faces_by_panel[panel.panel_id] = face_data
-                        except Exception:
-                            pass  # VLM failure → skip, use heuristic positioning
-
-        return self._run_algorithmic(inputs, context, faces_by_panel)
+        return self._run_algorithmic(inputs, context)
 
     def _run_algorithmic(
         self, inputs: LayoutInput, context: AgentContext,
-        faces_by_panel: dict[str, list] | None = None,
     ) -> LayoutOutput:
-        """Algorithmic layout pipeline (optionally VLM-face-aware)."""
-        if faces_by_panel is None:
-            faces_by_panel = {}
+        """Algorithmic layout pipeline — 气泡放置由上游 BubbleAgent 负责。"""
         final_pages: list[FinalPage] = []
         total_bubbles = 0
 
@@ -123,15 +102,25 @@ class LayoutAgent(BaseAgent[LayoutInput, LayoutOutput]):
                 gutter_px=inputs.gutter_px,
             )
 
-            # ---- Step 4: place dialogue bubbles ----
-            bubbles = place_bubbles(
-                page.panels, bboxes, inputs.panel_images,
-                font_size_pt=inputs.font_config.base_size_pt,
-                page_width_px=inputs.page_width_px,
-                page_height_px=inputs.page_height_px,
-                margin_px=inputs.margin_px,
-                faces_by_panel=faces_by_panel,
-            )
+            # ---- Step 4: 气泡来自上游 BubbleAgent 输出 ----
+            raw_placements = inputs.bubble_placements.get(page.page_id, [])
+            # 将 BubblePlacementResult 转为 BubblePlacement（compositor 接口不变）
+            from .layout.bubbles import BubblePlacement
+            bubbles: list[BubblePlacement] = []
+            for rp in raw_placements:
+                bubbles.append(BubblePlacement(
+                    panel_id=rp.panel_id,
+                    dialogue_index=rp.dialogue_index,
+                    bubble_type=rp.bubble_type,
+                    speaker=rp.speaker,
+                    text=rp.text,
+                    x=rp.x,
+                    y=rp.y,
+                    w=rp.w,
+                    h=rp.h,
+                    occlusion_score=rp.occlusion_score,
+                    tail_direction=rp.tail_direction,
+                ))
 
             # ---- Step 5: composite the page image ----
             panel_slots = [

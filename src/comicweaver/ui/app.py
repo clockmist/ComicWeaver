@@ -139,7 +139,9 @@ async def _consume_workflow(session: Session) -> None:
                         "story_agent": "story",
                         "character_agent": "character",
                         "script_agent": "script",
-                        "storyboard_agent": "storyboard", "image_agent": "image",
+                        "storyboard_agent": "storyboard",
+                        "image_agent": "image",
+                        "bubble_agent": "bubble",
                         "layout_agent": "layout",
                     }
                     session.current_phase = agent_to_phase.get(msg.node, "init")
@@ -360,7 +362,8 @@ _PHASE_PREREQUISITES: dict[str, list[str]] = {
     "script": ["developed_story", "character_db"],
     "storyboard": ["structured_script", "character_db"],
     "image": ["structured_script", "character_db", "storyboard_plan"],
-    "layout": ["structured_script", "character_db", "storyboard_plan", "panel_images"],
+    "bubble": ["storyboard_plan", "panel_images"],
+    "layout": ["storyboard_plan", "panel_images", "bubble_placements"],
 }
 # 每个阶段需要清除的输出字段（从该阶段开始，清除自身及之后所有阶段的输出）
 _PHASE_CLEAR_FIELDS: dict[str, list[str]] = {
@@ -390,10 +393,14 @@ _PHASE_CLEAR_FIELDS: dict[str, list[str]] = {
     "storyboard": [
         "storyboard_plan", "layout_grids",
         "panel_images", "generation_metadata",
-        "final_pages", "exports",
+        "bubble_placements", "final_pages", "exports",
     ],
     "image": [
         "panel_images", "generation_metadata",
+        "bubble_placements", "final_pages", "exports",
+    ],
+    "bubble": [
+        "bubble_placements",
         "final_pages", "exports",
     ],
     "layout": [
@@ -418,6 +425,7 @@ def _validate_and_reset_state(state: ComicState, start_phase: str) -> str | None
                 "character_db": "角色设计",
                 "storyboard_plan": "分镜规划",
                 "panel_images": "面板图像",
+                "bubble_placements": "台词气泡",
             }.get(field, field)
             return f"❌ 无法从「{phase_label}」阶段开始：缺少前置数据「{field_label}」。\n请先从头开始或从已完成的更早阶段开始。"
 
@@ -449,14 +457,15 @@ def _validate_and_reset_state(state: ComicState, start_phase: str) -> str | None
 _PHASE_LABELS_CN = {
     "init": "从头开始", "story": "故事阶段",
     "script": "剧本阶段", "character": "角色阶段",
-    "storyboard": "分镜阶段", "image": "图像阶段", "layout": "排版阶段",
+    "storyboard": "分镜阶段", "image": "图像阶段",
+    "bubble": "台词阶段", "layout": "排版阶段",
 }
 
 
 def start_workflow(start_phase: str = "init") -> Iterator[tuple]:
     """启动工作流并周期性产出UI更新（v0.4 7元组）。
 
-    start_phase: "init"(默认从头开始) 或 "script"/"character"/"storyboard"/"image"/"layout"
+    start_phase: "init"(默认从头开始) 或 "script"/"character"/"storyboard"/"image"/"bubble"/"layout"
     """
     if SESSION.state is None:
         yield (
@@ -519,6 +528,7 @@ def start_workflow(start_phase: str = "init") -> Iterator[tuple]:
         render_live_content(
             SESSION.panel_images_preview, SESSION.character_preview,
             render_phase_text_content(SESSION.state, SESSION.agent_outputs),
+            SESSION.state.get("bubble_placements", {}),
         ),
         render_project_info(SESSION.state),
         gr.update(interactive=False),
@@ -614,6 +624,8 @@ def respond_checkpoint(decision: str, guidance: str = "") -> Iterator[tuple]:
         elif cp_id == "after_image":
             SESSION.state["panel_images"] = []
             SESSION.panel_images_preview = []
+        elif cp_id == "after_bubble":
+            SESSION.state["bubble_placements"] = {}
         elif cp_id == "after_layout":
             SESSION.state["final_pages"] = []
             SESSION.state["exports"] = []
@@ -630,6 +642,7 @@ def respond_checkpoint(decision: str, guidance: str = "") -> Iterator[tuple]:
         render_live_content(
             SESSION.panel_images_preview, SESSION.character_preview,
             render_phase_text_content(SESSION.state, SESSION.agent_outputs),
+            SESSION.state.get("bubble_placements", {}),
         ),
         render_project_info(SESSION.state),
         gr.update(interactive=False),
@@ -876,6 +889,7 @@ def open_project_by_id(project_id: str) -> tuple[str, str, str, str, str, str, d
     right_html = render_live_content(
         panel_preview, char_preview,
         render_phase_text_content(state, SESSION.agent_outputs),
+        state.get("bubble_placements", {}),
     )
 
     # 渲染左侧面板：显示当前阶段,无活跃/已完成 agent
@@ -889,7 +903,8 @@ def open_project_by_id(project_id: str) -> tuple[str, str, str, str, str, str, d
         "character": "script",
         "script": "storyboard",
         "storyboard": "image",
-        "image": "layout",
+        "image": "bubble",
+        "bubble": "layout",
         "layout": "layout",
     }
     next_phase = _next_phase.get(current_phase, "init")
@@ -1105,6 +1120,7 @@ def build_ui() -> gr.Blocks:
                             ("剧本阶段", "script"),
                             ("分镜阶段", "storyboard"),
                             ("图像阶段", "image"),
+                            ("台词阶段", "bubble"),
                             ("排版阶段", "layout"),
                         ],
                         value="init", scale=1,

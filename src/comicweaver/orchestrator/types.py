@@ -44,6 +44,7 @@ KEY_CHECKPOINTS = {
     "after_script": "剧本结构确认",
     "after_character": "角色设计确认",
     "after_storyboard": "分镜规划确认",
+    "after_bubble": "台词气泡确认",
     "after_layout": "最终漫画确认",
 }
 

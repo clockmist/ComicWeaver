@@ -15,6 +15,7 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
 from comicweaver.agents import (
+    BubbleAgent,
     CharacterAgent,
     ImageAgent,
     LayoutAgent,
@@ -29,6 +30,7 @@ from comicweaver.core import (
     Action,
     AgentContext,
     BoundingBox,
+    BubbleInput,
     CharacterDB,
     CharacterDraft,
     CharacterInput,
@@ -60,6 +62,7 @@ from comicweaver.utils.logging import (
     log_performance,
     log_state_change,
     log_workflow_event,
+    summarize_bubble_output,
     summarize_character_output,
     summarize_image_output,
     summarize_layout_output,
@@ -100,6 +103,7 @@ class ComicWorkflow:
         self.character_agent = CharacterAgent()
         self.storyboard_agent = StoryboardAgent()
         self.image_agent = ImageAgent()
+        self.bubble_agent = BubbleAgent()
         self.layout_agent = LayoutAgent()
 
         self._resume_phase = resume_phase
@@ -134,20 +138,22 @@ class ComicWorkflow:
     def _build_graph(self) -> StateGraph:
         builder = StateGraph(ComicState)
 
-        # -- 6 个生产节点，线性串联 (v1.0: character 移到 script 之前) --
+        # -- 7 个生产节点，线性串联 (v1.0: character 移到 script 之前) --
         builder.add_node("story", self._node_story)
         builder.add_node("character", self._node_character)
         builder.add_node("script", self._node_script)
         builder.add_node("storyboard", self._node_storyboard)
         builder.add_node("image", self._node_image)
+        builder.add_node("bubble", self._node_bubble)
         builder.add_node("layout", self._node_layout)
 
-        # -- 边：story → character → script → storyboard → image → layout → END --
+        # -- 边：story → character → script → storyboard → image → bubble → layout → END --
         builder.add_edge("story", "character")
         builder.add_edge("character", "script")
         builder.add_edge("script", "storyboard")
         builder.add_edge("storyboard", "image")
-        builder.add_edge("image", "layout")
+        builder.add_edge("image", "bubble")
+        builder.add_edge("bubble", "layout")
         builder.add_edge("layout", END)
 
         # -- 入口：根据 resume_phase 决定从哪个节点开始 --
@@ -159,6 +165,7 @@ class ComicWorkflow:
             "character": "character",
             "storyboard": "storyboard",
             "image": "image",
+            "bubble": "bubble",
             "layout": "layout",
         }
         start_node = "story"
@@ -594,6 +601,86 @@ class ComicWorkflow:
         writer(WorkflowMessage(WorkflowEvent.NODE_END, "image_agent"))
         return state
 
+    async def _node_bubble(self, state: ComicState) -> ComicState:
+        """台词气泡放置阶段 — BubbleAgent 计算所有面板的气泡坐标。"""
+        t0 = time.perf_counter()
+        writer = get_stream_writer()
+        writer(WorkflowMessage(WorkflowEvent.NODE_START, "bubble_agent"))
+        writer(log_workflow_event("进入阶段", "bubble"))
+
+        state["current_phase"] = "bubble"
+        ctx = self._make_context(state)
+        raw_storyboard = state.get("storyboard_plan", [])
+        if not raw_storyboard:
+            raise ApiBackendError(
+                "storyboard_plan is empty — cannot place bubbles without panels"
+            )
+        pages = [PageLayout.model_validate(p) for p in raw_storyboard]
+        panel_imgs = {
+            p["panel_id"]: PanelImage.model_validate(p)
+            for p in state.get("panel_images", [])
+        }
+
+        # 统计对话信息
+        total_dialogues = sum(
+            len(panel.dialogues_in_panel) for page in pages for panel in page.panels
+        )
+        writer(log_agent_input("bubble_agent", {
+            "page_count": len(pages),
+            "panel_image_count": len(panel_imgs),
+            "total_dialogues": total_dialogues,
+        }))
+
+        inputs = BubbleInput(
+            pages=pages,
+            panel_images=panel_imgs,
+            page_width_px=1240,
+            page_height_px=1754,
+            margin_px=40,
+            gutter_px=10,
+            reading_direction="ltr",
+        )
+
+        # --- Regenerate loop ---
+        while True:
+            try:
+                async for evt in self.bubble_agent.astream(inputs, ctx):
+                    writer(evt)
+                    if evt.type == StreamEventType.DONE and evt.content:
+                        state["bubble_placements"] = evt.content.get(
+                            "bubble_placements", {}
+                        )
+                        writer(log_agent_output("bubble_agent",
+                            summarize_bubble_output(evt.content)))
+            except Exception as exc:
+                writer(log_agent_error("bubble_agent", f"执行失败: {exc}",
+                    {"page_count": len(pages), "error_type": type(exc).__name__}))
+                raise
+
+            # --- Checkpoint & auto-save ---
+            self._save_checkpoint(state)
+            if not should_pause(state, "after_bubble"):
+                break
+            writer(CheckpointSignal(
+                checkpoint_id="after_bubble",
+                label=KEY_CHECKPOINTS["after_bubble"],
+                payload={
+                    "phase": state.get("current_phase", "?"),
+                    "project_id": state.get("project_id", "?"),
+                },
+            ))
+            await self._await_response()
+            if self._last_decision != "regenerate":
+                break
+            state["bubble_placements"] = {}
+            if self._last_guidance:
+                writer(log_workflow_event("用户指导", self._last_guidance[:200]))
+
+        elapsed = (time.perf_counter() - t0) * 1000
+        writer(log_performance("bubble_agent", elapsed))
+        writer(WorkflowMessage(WorkflowEvent.NODE_END, "bubble_agent"))
+        return state
+
     async def _node_layout(self, state: ComicState) -> ComicState:
         t0 = time.perf_counter()
         writer = get_stream_writer()
@@ -613,9 +700,13 @@ class ComicWorkflow:
             for p in state.get("panel_images", [])
         }
 
+        # 从 bubble_placements state 读取气泡数据
+        bubble_placements = state.get("bubble_placements", {})
+
         inputs = LayoutInput(
             pages=pages,
             panel_images=panel_imgs,
+            bubble_placements=bubble_placements,
             style_preset=state.get("style_preset", "manga"),
             page_width_px=1240,
             page_height_px=1754,
@@ -792,7 +883,8 @@ class ComicWorkflow:
             "script": "character",
             "character": "storyboard",
             "storyboard": "image",
-            "image": "layout",
+            "image": "bubble",
+            "bubble": "layout",
             "layout": "layout",
         }
         resume_phase = _next_phase.get(phase, "script")

@@ -683,8 +683,9 @@ def render_project_info(state: dict | None = None) -> str:
     pid = state.get("project_id", "?")
     phase = state.get("current_phase", "init")
     phase_labels = {
-        "init": "等待开始", "script": "剧本阶段", "character": "角色阶段",
-        "storyboard": "分镜阶段", "image": "图像阶段", "layout": "排版阶段",
+        "init": "等待开始", "story": "故事阶段", "script": "剧本阶段",
+        "character": "角色阶段", "storyboard": "分镜阶段",
+        "image": "图像阶段", "bubble": "台词阶段", "layout": "排版阶段",
     }
     phase_label = phase_labels.get(phase, phase)
 
@@ -705,18 +706,80 @@ def render_project_info(state: dict | None = None) -> str:
 def render_live_panel_preview(
     panel_images: list[dict],
     character_images: list[dict] | None = None,
+    bubble_placements: dict | None = None,
 ) -> str:
-    """渲染实时预览区：角色人设图 + 面板图像。"""
+    """渲染实时预览区：角色人设图 + 面板图像 + 台词气泡标注。"""
     if character_images is None:
         character_images = []
+    if bubble_placements is None:
+        bubble_placements = {}
 
     has_chars = bool(character_images)
     has_panels = bool(panel_images)
+    has_bubbles = bool(bubble_placements)
 
     if not has_chars and not has_panels:
-        return '<div style="color:#64748b;padding:8px;font-size:12px;">⏳ 等待图像生成...</div>'
+        # 即使没有图像，有气泡数据也要显示
+        if not has_bubbles:
+            return '<div style="color:#64748b;padding:8px;font-size:12px;">⏳ 等待图像生成...</div>'
+
+    # 构建 panel_id → bubbles 映射
+    panel_bubbles_map: dict[str, list[dict]] = {}
+    if has_bubbles:
+        for page_id, bubbles in bubble_placements.items():
+            for b in bubbles:
+                pid = b.get("panel_id", "") if isinstance(b, dict) else getattr(b, "panel_id", "")
+                if pid not in panel_bubbles_map:
+                    panel_bubbles_map[pid] = []
+                panel_bubbles_map[pid].append(b)
 
     parts: list[str] = []
+
+    # 台词气泡预览（最上方，最显眼）
+    if has_bubbles:
+        total_bubbles = sum(len(v) for v in panel_bubbles_map.values())
+        bubble_items = []
+        for page_id, bubbles in bubble_placements.items():
+            page_num = page_id.replace("page_", "").lstrip("0") or "?"
+            for b in bubbles:
+                pid = b.get("panel_id", "?") if isinstance(b, dict) else getattr(b, "panel_id", "?")
+                btype = b.get("bubble_type", "speech") if isinstance(b, dict) else getattr(b, "bubble_type", "speech")
+                speaker = b.get("speaker", "") if isinstance(b, dict) else getattr(b, "speaker", "")
+                text = b.get("text", "") if isinstance(b, dict) else getattr(b, "text", "")
+                pos = b.get("tail_direction", "auto") if isinstance(b, dict) else getattr(b, "tail_direction", "auto")
+                font_size = b.get("font_size_pt", 14) if isinstance(b, dict) else getattr(b, "font_size_pt", 14)
+
+                type_icon = {"speech": "💬", "thought": "☁️", "shout": "📢", "whisper": "🤫", "narration": "📋"}.get(btype, "💬")
+                type_color = {"speech": "#3b82f6", "thought": "#8b5cf6", "shout": "#ef4444", "whisper": "#6b7280", "narration": "#92400e"}.get(btype, "#3b82f6")
+
+                speaker_label = f"<b>{html.escape(str(speaker))}:</b> " if speaker else ""
+                bubble_items.append(f"""
+                <div style="display:flex;align-items:flex-start;gap:6px;padding:6px 8px;
+                            margin:2px 0;background:#f8fafc;border-left:3px solid {type_color};
+                            border-radius:0 4px 4px 0;font-size:12px;">
+                    <span style="font-size:14px;">{type_icon}</span>
+                    <div style="flex:1;min-width:0;">
+                        <div style="color:#1e293b;">
+                            {speaker_label}<span style="color:#334155;">"{html.escape(str(text)[:60])}{'…' if len(str(text))>60 else ''}"</span>
+                        </div>
+                        <div style="color:#94a3b8;font-size:10px;margin-top:2px;">
+                            {html.escape(pid)} · 位置:{html.escape(pos)} · {font_size}pt
+                        </div>
+                    </div>
+                </div>
+                """)
+
+        parts.append(f"""
+        <div style="margin-bottom:8px;padding:8px;background:#fffbeb;border:1px solid #fcd34d;
+                    border-radius:8px;">
+            <div style="font-size:13px;font-weight:700;color:#92400e;margin-bottom:6px;">
+                💬 台词气泡放置结果 ({total_bubbles}个)
+            </div>
+            <div style="max-height:260px;overflow-y:auto;">
+                {"".join(bubble_items)}
+            </div>
+        </div>
+        """)
 
     # 角色人设图
     if has_chars:
@@ -1227,6 +1290,7 @@ _PHASE_AGENTS_V3 = [
     ("script_agent", "📝 剧本"),
     ("storyboard_agent", "🎬 分镜"),
     ("image_agent", "🎨 图像"),
+    ("bubble_agent", "💬 台词"),
     ("layout_agent", "📐 排版"),
 ]
 
@@ -1399,12 +1463,13 @@ def _agent_to_phase(active: str, done: list[str]) -> str:
         "character_agent": "character",
         "storyboard_agent": "storyboard",
         "image_agent": "image",
+        "bubble_agent": "bubble",
         "layout_agent": "layout",
     }
     if active and active in agent_to_phase:
         return agent_to_phase[active]
     # 返回最后完成的阶段
-    phase_order = ["story", "script", "character", "storyboard", "image", "layout"]
+    phase_order = ["story", "script", "character", "storyboard", "image", "bubble", "layout"]
     reverse_agents = {v: k for k, v in agent_to_phase.items()}
     last_phase = "init"
     for phase in phase_order:
@@ -1446,7 +1511,7 @@ def render_inline_checkpoint(checkpoint: dict | None) -> str:
 # v0.4 新增：阶段跳转、文字内容展示、指导信息
 # ============================================================================
 
-_PHASE_ORDER = ["init", "story", "character", "script", "storyboard", "image", "layout"]
+_PHASE_ORDER = ["init", "story", "character", "script", "storyboard", "image", "bubble", "layout"]
 _PHASE_LABELS: dict[str, str] = {
     "init": "初始",
     "story": "故事",
@@ -1454,6 +1519,7 @@ _PHASE_LABELS: dict[str, str] = {
     "character": "角色",
     "storyboard": "分镜",
     "image": "图像",
+    "bubble": "台词",
     "layout": "排版",
 }
 
@@ -1473,6 +1539,7 @@ def render_phase_jump_buttons(current_phase: str, done_agents: list[str] | None 
         "character_agent": "character",
         "storyboard_agent": "storyboard",
         "image_agent": "image",
+        "bubble_agent": "bubble",
         "layout_agent": "layout",
     }
     done_phases = {"init"}
@@ -1543,6 +1610,11 @@ def render_phase_text_content(state: dict | None, agent_outputs: dict[str, list[
     panel_images = state.get("panel_images", [])
     if panel_images:
         parts.append(_render_detailed_images(panel_images))
+
+    # 台词阶段完成 → 显示气泡放置摘要
+    bubble_placements = state.get("bubble_placements", {})
+    if bubble_placements:
+        parts.append(_render_bubble_summary(bubble_placements))
 
     # 排版阶段完成 → 显示布局和最终图片
     final_pages = state.get("final_pages", [])
@@ -2061,6 +2133,44 @@ def _render_detailed_images(panel_images: list[dict]) -> str:
     """
 
 
+def _render_bubble_summary(bubble_placements: dict) -> str:
+    """渲染台词气泡放置摘要。"""
+    import html
+
+    total = 0
+    rows: list[str] = []
+    for page_id, bubbles in bubble_placements.items():
+        for b in bubbles:
+            total += 1
+            panel_id = b.get("panel_id", "?") if isinstance(b, dict) else getattr(b, "panel_id", "?")
+            bubble_type = b.get("bubble_type", "speech") if isinstance(b, dict) else getattr(b, "bubble_type", "speech")
+            speaker = b.get("speaker", "") if isinstance(b, dict) else getattr(b, "speaker", "")
+            text = b.get("text", "") if isinstance(b, dict) else getattr(b, "text", "")
+            font_size = b.get("font_size_pt", 14) if isinstance(b, dict) else getattr(b, "font_size_pt", 14)
+            tail = b.get("tail_direction", "auto") if isinstance(b, dict) else getattr(b, "tail_direction", "auto")
+            face_count = b.get("face_count", 0) if isinstance(b, dict) else getattr(b, "face_count", 0)
+
+            speaker_label = f"<strong>{html.escape(speaker)}:</strong> " if speaker else ""
+            rows.append(
+                f'<div class="cw-bubble-item">'
+                f'<span class="cw-badge">{html.escape(bubble_type)}</span> '
+                f'{speaker_label}'
+                f'"{html.escape(str(text)[:80])}" '
+                f'<span style="font-size:11px;color:#888;">'
+                f'字号{font_size}pt · 尾部{html.escape(tail)}'
+                f'{" · 人脸" + str(face_count) if face_count else ""}'
+                f'</span>'
+                f'</div>'
+            )
+
+    return f"""
+    <div class="cw-phase-text-section">
+        <h3>💬 台词气泡放置 ({total} 个气泡)</h3>
+        {"".join(rows) if rows else '<div class="cw-empty">无对话气泡</div>'}
+    </div>
+    """
+
+
 def _render_detailed_final_pages(final_pages: list[dict], storyboard: list[dict]) -> str:
     """渲染完整排版结果：布局网格、对话气泡、最终图片。"""
     if not final_pages:
@@ -2167,9 +2277,10 @@ def render_live_content(
     panel_images: list[dict],
     character_images: list[dict],
     text_html: str,
+    bubble_placements: dict | None = None,
 ) -> str:
-    """渲染创作Tab右侧面板：文字内容 + 图像预览。"""
-    image_preview = render_live_panel_preview(panel_images, character_images)
+    """渲染创作Tab右侧面板：文字内容 + 台词气泡预览 + 图像预览。"""
+    image_preview = render_live_panel_preview(panel_images, character_images, bubble_placements)
 
     return f"""
     <div class="cw-live-content">

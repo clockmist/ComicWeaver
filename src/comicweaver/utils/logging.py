@@ -390,6 +390,36 @@ def summarize_layout_output(output: dict) -> dict:
     }
 
 
+def summarize_bubble_output(output: dict) -> dict:
+    """从 BubbleOutput 构建可读摘要。"""
+    placements = output.get("bubble_placements", {})
+    total = output.get("total_bubbles", 0)
+    face_stats = output.get("face_detection_stats", {})
+
+    # 按面板汇总
+    panel_summary = {}
+    for page_id, bubbles in placements.items():
+        for b in bubbles:
+            pid = b.get("panel_id", "?")
+            if pid not in panel_summary:
+                panel_summary[pid] = {"count": 0, "types": []}
+            panel_summary[pid]["count"] += 1
+            panel_summary[pid]["types"].append(b.get("bubble_type", "speech"))
+
+    return {
+        "total_bubbles": total,
+        "pages_processed": len(placements),
+        "face_detection_stats": face_stats,
+        "panel_summary": {
+            pid: {
+                "count": info["count"],
+                "types": list(set(info["types"])),
+            }
+            for pid, info in panel_summary.items()
+        },
+    }
+
+
 def summarize_review_output(output: dict) -> dict:
     """从 ReviewOutput 构建可读摘要。"""
     fb = output.get("feedback") or {}

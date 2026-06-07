@@ -56,6 +56,9 @@ class ComicState(TypedDict, total=False):
     panel_images: list[dict]
     generation_metadata: list
 
+    # 台词气泡
+    bubble_placements: dict
+
     # 排版
     final_pages: list[dict]
     exports: list[dict]
@@ -105,6 +108,7 @@ def make_initial_state(
         layout_grids=[],
         panel_images=[],
         generation_metadata=[],
+        bubble_placements={},
         final_pages=[],
         exports=[],
         export_format="png",

@@ -551,9 +551,50 @@ class ExportArtifact(BaseModel):
     page_count: int = 0
 
 
+class BubblePlacementResult(BaseModel):
+    """单个气泡放置结果 — BubbleAgent 输出的气泡坐标和样式参数。"""
+    panel_id: str
+    dialogue_index: int
+    bubble_type: str = "speech"
+    speaker: str = ""
+    text: str = ""
+    x: float = 0.0              # 归一化坐标 (0-1), 相对整页
+    y: float = 0.0
+    w: float = 0.1
+    h: float = 0.05
+    font_size_pt: int = 14
+    tail_direction: str = "auto"
+    occlusion_score: float = 0.0
+    face_count: int = 0         # 该面板检测到的人脸数（日志用）
+
+
+class BubbleInput(BaseModel):
+    """BubbleAgent 输入"""
+    pages: list[PageLayout]
+    panel_images: dict[str, PanelImage] = Field(default_factory=dict)
+    font_config: FontConfig = Field(default_factory=FontConfig)
+    page_width_px: int = 1240
+    page_height_px: int = 1754
+    margin_px: int = 40
+    gutter_px: int = 10
+    reading_direction: Literal["ltr", "rtl"] = "ltr"
+    feedback: ReviewFeedback | None = None
+
+
+class BubbleOutput(BaseModel):
+    """BubbleAgent 输出"""
+    bubble_placements: dict[str, list[BubblePlacementResult]] = Field(default_factory=dict)
+    total_bubbles: int = 0
+    face_detection_stats: dict[str, int] = Field(default_factory=dict)
+    meta: AgentOutputMeta = Field(default_factory=lambda: AgentOutputMeta(
+        agent="bubble_agent", version="0.1.0"
+    ))
+
+
 class LayoutInput(BaseModel):
     pages: list[PageLayout]
     panel_images: dict[str, PanelImage] = Field(default_factory=dict)
+    bubble_placements: dict[str, list[BubblePlacementResult]] = Field(default_factory=dict)
     style_preset: str = "manga"
     font_config: FontConfig = Field(default_factory=FontConfig)
     export_formats: list[str] = Field(default_factory=lambda: ["png"])
