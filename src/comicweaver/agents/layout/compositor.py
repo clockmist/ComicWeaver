@@ -371,7 +371,11 @@ def _render_bubbles(
     bg_color: tuple[int, int, int],
     font_size_pt: int = 14,
 ) -> None:
-    """Dispatch each bubble to its type-specific renderer."""
+    """Dispatch each bubble to its type-specific renderer.
+
+    每个气泡使用自身的 font_size_pt（由 BubbleAgent 根据面板大小自适应计算），
+    渲染函数内部会从 bp.style 读取样式参数（fill/outline/border/radius/tail）。
+    """
     for bp in bubbles:
         bx = margin_px + int(inner_w * bp.x)
         by = margin_px + int(inner_h * bp.y)
@@ -379,16 +383,19 @@ def _render_bubbles(
         bh = int(inner_h * bp.h)
         body = (bx, by, bx + bw, by + bh)
 
+        # 使用气泡自身的字体大小（兜底全局参数）
+        bp_font = getattr(bp, 'font_size_pt', None) or font_size_pt
+
         if bp.bubble_type == "thought":
-            _draw_thought(draw, body, bp, bg_color, font_size_pt)
+            _draw_thought(draw, body, bp, bg_color, bp_font)
         elif bp.bubble_type == "shout":
-            _draw_shout(draw, body, bp, bg_color, font_size_pt)
+            _draw_shout(draw, body, bp, bg_color, bp_font)
         elif bp.bubble_type == "whisper":
-            _draw_whisper(draw, body, bp, bg_color, font_size_pt)
+            _draw_whisper(draw, body, bp, bg_color, bp_font)
         elif bp.bubble_type == "narration":
-            _draw_narration(draw, body, bp, font_size_pt)
+            _draw_narration(draw, body, bp, bp_font)
         else:  # "speech" or unknown
-            _draw_speech(draw, body, bp, font_size_pt)
+            _draw_speech(draw, body, bp, bp_font)
 
 
 # ---------------------------------------------------------------------------
@@ -398,6 +405,7 @@ def _render_bubbles(
 def _tail_polygon(
     body: tuple[int, int, int, int],
     direction: str,
+    tail_size: int = _TAIL_SIZE,
 ) -> list[tuple[int, int]]:
     """Return a 3-point polygon for the tail, given the bubble body rect.
 
@@ -408,7 +416,7 @@ def _tail_polygon(
     x1, y1, x2, y2 = body
     cx = (x1 + x2) // 2
     cy = (y1 + y2) // 2
-    ts = _TAIL_SIZE
+    ts = tail_size
 
     # Map "where should tail point" → "which edge of bubble" + "triangle coords"
     # Tail base sits on the bubble edge, tip extends outward.
@@ -441,28 +449,40 @@ def _draw_speech(
 ) -> None:
     """Rounded rectangle speech bubble with triangular tail."""
     x1, y1, x2, y2 = body
-    tail = _tail_polygon(body, bp.tail_direction)
+
+    # 从 bp.style 读取样式参数，兜底默认值
+    style: dict = getattr(bp, 'style', None) or {}
+    radius = style.get("radius", 12)
+    border = style.get("border", 2)
+    outline = tuple(style.get("outline", (20, 20, 20)))
+    fill = tuple(style.get("fill", (255, 255, 255)))
+    tail_size = style.get("tail", _TAIL_SIZE)
+    effective_font = getattr(bp, 'font_size_pt', font_size_pt) or font_size_pt
+
+    tail = _tail_polygon(body, bp.tail_direction, tail_size)
 
     # Draw tail first (filled, no outline)
-    draw.polygon(tail, fill=(255, 255, 255))
+    draw.polygon(tail, fill=fill)
 
     # Bubble body
     draw.rounded_rectangle(
-        (x1, y1, x2, y2), radius=12,
-        fill=(255, 255, 255), outline=(20, 20, 20), width=2,
+        (x1, y1, x2, y2), radius=radius,
+        fill=fill, outline=outline, width=border,
     )
 
     # Tail outline — draw the two edges of the triangle that aren't on the bubble
-    _draw_tail_outline(draw, tail, body)
+    _draw_tail_outline(draw, tail, body, outline_color=outline, border_width=border)
 
     # Text
-    _draw_bubble_text(draw, bp, x1, y1, x2, y2, font_size_pt=font_size_pt)
+    _draw_bubble_text(draw, bp, x1, y1, x2, y2, font_size_pt=effective_font)
 
 
 def _draw_tail_outline(
     draw: ImageDraw.ImageDraw,
     tail: list[tuple[int, int]],
     body: tuple[int, int, int, int],
+    outline_color: tuple[int, int, int] = (20, 20, 20),
+    border_width: int = 2,
 ) -> None:
     """Draw thin lines for the two 'free' edges of the tail triangle."""
     x1, y1, x2, y2 = body
@@ -473,7 +493,7 @@ def _draw_tail_outline(
         on_border_a = (a[0] == x1 or a[0] == x2 or a[1] == y1 or a[1] == y2)
         on_border_b = (b[0] == x1 or b[0] == x2 or b[1] == y1 or b[1] == y2)
         if not (on_border_a and on_border_b):
-            draw.line([a, b], fill=(20, 20, 20), width=2)
+            draw.line([a, b], fill=outline_color, width=border_width)
 
 
 # ---------------------------------------------------------------------------
@@ -489,6 +509,14 @@ def _draw_thought(
 ) -> None:
     """Cloud-like thought bubble: rounded rect + circles along the bottom."""
     x1, y1, x2, y2 = body
+
+    style: dict = getattr(bp, 'style', None) or {}
+    radius = style.get("radius", 16)
+    border = style.get("border", 2)
+    outline = tuple(style.get("outline", (180, 180, 200)))
+    fill = tuple(style.get("fill", (255, 255, 255)))
+    effective_font = getattr(bp, 'font_size_pt', font_size_pt) or font_size_pt
+
     r = _THOUGHT_DOT_R
     # Dot positions: leading from the bubble toward the panel centre
     tail_dir = bp.tail_direction or "down"
@@ -497,15 +525,15 @@ def _draw_thought(
     # Draw dots
     for (dx, dy) in dots:
         draw.ellipse((dx - r, dy - r, dx + r, dy + r),
-                     fill=(255, 255, 255), outline=(180, 180, 200), width=1)
+                     fill=fill, outline=outline, width=1)
 
     # Bubble body (draw after dots so it covers overlapping dot edges)
     draw.rounded_rectangle(
-        (x1, y1, x2, y2), radius=16,
-        fill=(255, 255, 255), outline=(180, 180, 200), width=2,
+        (x1, y1, x2, y2), radius=radius,
+        fill=fill, outline=outline, width=border,
     )
 
-    _draw_bubble_text(draw, bp, x1, y1, x2, y2, font_size_pt=font_size_pt)
+    _draw_bubble_text(draw, bp, x1, y1, x2, y2, font_size_pt=effective_font)
 
 
 def _thought_dot_positions(
@@ -547,14 +575,22 @@ def _draw_shout(
 ) -> None:
     """Jagged / spiky shout bubble for intense dialogue."""
     x1, y1, x2, y2 = body
+
+    style: dict = getattr(bp, 'style', None) or {}
+    outline = tuple(style.get("outline", (200, 40, 40)))
+    fill = tuple(style.get("fill", (255, 255, 240)))
+    border = style.get("border", 2)
+    tail_size = style.get("tail", _TAIL_SIZE)
+    effective_font = getattr(bp, 'font_size_pt', font_size_pt) or font_size_pt
+
     # Generate jagged outline points
     points = _jagged_outline(x1, y1, x2, y2, amplitude=6, frequency=8)
-    tail_pts = _tail_polygon(body, bp.tail_direction)
+    tail_pts = _tail_polygon(body, bp.tail_direction, tail_size)
 
     # Draw filled polygon (body + tail)
-    draw.polygon(points + tail_pts, fill=(255, 255, 240), outline=(200, 40, 40), width=2)
+    draw.polygon(points + tail_pts, fill=fill, outline=outline, width=border)
 
-    _draw_bubble_text(draw, bp, x1 + 6, y1 + 6, x2 - 6, y2 - 6, font_size_pt=font_size_pt)
+    _draw_bubble_text(draw, bp, x1 + 6, y1 + 6, x2 - 6, y2 - 6, font_size_pt=effective_font)
 
 
 def _jagged_outline(
@@ -614,17 +650,27 @@ def _draw_whisper(
 ) -> None:
     """Dashed-border whisper bubble for quiet / secretive dialogue."""
     x1, y1, x2, y2 = body
+
+    style: dict = getattr(bp, 'style', None) or {}
+    radius = style.get("radius", 12)
+    border = style.get("border", 1)
+    outline = tuple(style.get("outline", (140, 140, 160)))
+    fill = tuple(style.get("fill", (250, 250, 255)))
+    effective_font = getattr(bp, 'font_size_pt', font_size_pt) or font_size_pt
+    # 派生文字颜色：outline 加深一点
+    text_color = tuple(max(0, c - 40) for c in outline)
+
     # Fill
     draw.rounded_rectangle(
-        (x1, y1, x2, y2), radius=12,
-        fill=(250, 250, 255),
+        (x1, y1, x2, y2), radius=radius,
+        fill=fill,
     )
     # Dashed outline — draw as short line segments
-    _draw_dashed_rounded_rect(draw, x1, y1, x2, y2, radius=12,
+    _draw_dashed_rounded_rect(draw, x1, y1, x2, y2, radius=radius,
                               dash_len=6, gap_len=4,
-                              color=(140, 140, 160), width=1)
+                              color=outline, width=border)
 
-    _draw_bubble_text(draw, bp, x1, y1, x2, y2, text_color=(100, 100, 120), font_size_pt=font_size_pt)
+    _draw_bubble_text(draw, bp, x1, y1, x2, y2, text_color=text_color, font_size_pt=effective_font)
 
 
 def _draw_dashed_rounded_rect(
@@ -713,15 +759,22 @@ def _draw_narration(
     bp: "BubblePlacement",
     font_size_pt: int = 14,
 ) -> None:
-    """Simple narration box.  Kept as a stub for future enhancement."""
+    """Narration box with dynamic style from BubblePlacement."""
     x1, y1, x2, y2 = body
-    draw.rectangle(
-        (x1, y1, x2, y2),
-        fill=(255, 255, 240),
-        outline=(80, 80, 80),
-        width=2,
+
+    style: dict = getattr(bp, 'style', None) or {}
+    radius = style.get("radius", 4)
+    border = style.get("border", 2)
+    outline = tuple(style.get("outline", (80, 80, 80)))
+    fill = tuple(style.get("fill", (255, 255, 240)))
+    effective_font = getattr(bp, 'font_size_pt', font_size_pt) or font_size_pt
+    text_color = tuple(max(0, c - 20) for c in outline)
+
+    draw.rounded_rectangle(
+        (x1, y1, x2, y2), radius=radius,
+        fill=fill, outline=outline, width=border,
     )
-    _draw_bubble_text(draw, bp, x1, y1, x2, y2, text_color=(60, 60, 60))
+    _draw_bubble_text(draw, bp, x1, y1, x2, y2, text_color=text_color, font_size_pt=effective_font)
 
 
 # ---------------------------------------------------------------------------
@@ -735,19 +788,11 @@ def _draw_bubble_text(
     text_color: tuple[int, int, int] = (30, 30, 30),
     font_size_pt: int = 14,
 ) -> None:
-    """Render speaker label + wrapped dialogue text inside the bubble."""
-    speaker_font = _safe_font(font_size_pt + 4)
+    """Render wrapped dialogue text inside the bubble (no speaker label)."""
     text_font = _safe_font(font_size_pt)
 
     pad = 10
-    if bp.speaker:
-        draw.text(
-            (x1 + pad, y1 + 8), f"{bp.speaker}:",
-            fill=(40, 40, 80), font=speaker_font,
-        )
-        text_y = y1 + 32
-    else:
-        text_y = y1 + pad
+    text_y = y1 + pad
 
     text_max_w = (x2 - x1) - pad * 2
     lines = _wrap_text(draw, bp.text, text_max_w, text_font)

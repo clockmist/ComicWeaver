@@ -120,6 +120,8 @@ class LayoutAgent(BaseAgent[LayoutInput, LayoutOutput]):
                     h=rp.h,
                     occlusion_score=rp.occlusion_score,
                     tail_direction=rp.tail_direction,
+                    font_size_pt=rp.font_size_pt,
+                    style=rp.style,
                 ))
 
             # ---- Step 5: composite the page image ----
@@ -270,6 +272,6 @@ def _bubble_to_placed(
         bubble_type=bp.bubble_type,
         bbox=BoundingBox(x=bp.x, y=bp.y, width=bp.w, height=bp.h),
         text=bp.text,
-        font_size_pt=12,
+        font_size_pt=getattr(bp, 'font_size_pt', 12) or 12,
         occlusion_score=bp.occlusion_score,
     )

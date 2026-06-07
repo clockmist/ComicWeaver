@@ -118,8 +118,12 @@ class TestPlaceBubbles:
         bboxes = [BoundingBox(x=0.1, y=0.1, width=0.8, height=0.8)]
         result = place_bubbles(panels, bboxes, {})
         assert len(result) == 2
-        # Second bubble should be offset vertically below the first
-        assert result[1].y > result[0].y
+        # 多气泡应分散在不同位置（不再堆叠），位置坐标不重叠
+        positions_differ = (
+            abs(result[1].x - result[0].x) > 0.01
+            or abs(result[1].y - result[0].y) > 0.01
+        )
+        assert positions_differ, f"Bubbles should be at different positions, got {result[0].x},{result[0].y} and {result[1].x},{result[1].y}"
 
     def test_bubble_uses_hint_position(self):
         panels = [

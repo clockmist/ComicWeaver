@@ -404,13 +404,14 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
             else ""
         )
 
+        nl = '\n'
         user_msg = (
             f"=== STORY CONTEXT ===\n"
             f"Story so far (before this block): {story_so_far}\n"
             f"{next_hint}"
             f"\n=== CHARACTER DESIGNS ===\n{char_context}\n"
             f"\n=== PAGES TO EXPAND ({len(chunk_pages)} consecutive pages) ===\n"
-            f"{'\n'.join(pages_desc)}\n"
+            f"{nl.join(pages_desc)}\n"
             f"\nExpand each page into its specified number of panels. "
             f"Maintain narrative flow ACROSS pages in this block. "
             f"Return a JSON object with a 'pages' key containing the array "

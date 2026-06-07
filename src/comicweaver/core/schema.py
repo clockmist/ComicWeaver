@@ -566,6 +566,7 @@ class BubblePlacementResult(BaseModel):
     tail_direction: str = "auto"
     occlusion_score: float = 0.0
     face_count: int = 0         # 该面板检测到的人脸数（日志用）
+    style: dict = Field(default_factory=dict)  # {fill, outline, border, radius, tail} — 供 compositor 使用
 
 
 class BubbleInput(BaseModel):

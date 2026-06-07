@@ -14,7 +14,7 @@ Design principle:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from comicweaver.core.schema import BoundingBox, BubbleHint
@@ -41,6 +41,8 @@ class BubblePlacement:
     h: float
     occlusion_score: float = 0.0
     tail_direction: str = "auto"  # "up" | "down" | "left" | "right" | "up_left" | ...
+    font_size_pt: int = 12
+    style: dict = field(default_factory=dict)  # {fill, outline, border, radius, tail}
 
 
 def _derive_tail_direction(
@@ -181,11 +183,11 @@ def estimate_text_size(
     # Add padding (matching compositor's _draw_bubble_text)
     pad = 10
     width = int(max_w) + pad * 2 + 4  # +4 for safety margin
-    height = text_h + pad * 2 + 28    # +28 for speaker label area
+    height = text_h + pad * 2
 
     # Clamp to reasonable limits
-    width = max(80, min(width, 500))
-    height = max(40, min(height, 350))
+    width = max(80, min(width, 700))
+    height = max(40, min(height, 500))
 
     return width, height
 
@@ -243,6 +245,197 @@ def _resolve_bubble_type(dialogue: Dialogue, hint: BubbleHint | None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Adaptive bubble size
+# ---------------------------------------------------------------------------
+
+# Shot-size → font-size multiplier (特写→更大，远景→更小)
+_SHOT_SIZE_MULTIPLIER: dict[str, float] = {
+    "extreme_long": 0.85,
+    "long": 0.90,
+    "full": 1.00,
+    "medium": 1.05,
+    "close": 1.10,
+    "extreme_close": 1.15,
+}
+
+
+def calculate_bubble_size(
+    text: str,
+    panel_bbox: "BoundingBox",
+    shot_size: str,
+    emotion_intensity: float,
+    page_width_px: int = 1240,
+    page_height_px: int = 1754,
+    margin_px: int = 40,
+) -> tuple[float, float, int]:
+    """根据面板大小、景别和情感强度计算气泡的归一化尺寸和字号。
+
+    返回 (w_norm, h_norm, font_size_pt)，其中 w_norm/h_norm 是相对整页的归一化值。
+    """
+    inner_w = page_width_px - margin_px * 2
+    inner_h = page_height_px - margin_px * 2
+
+    # 面板像素面积（基于归一化 bbox 换算）
+    panel_w_px = panel_bbox.width * inner_w
+    panel_h_px = panel_bbox.height * inner_h
+    panel_area_px = panel_w_px * panel_h_px
+    page_area_px = inner_w * inner_h
+
+    # 基础字体：按面板占页面的比例缩放，18pt(min) ~ 34pt(max)
+    area_ratio = panel_area_px / max(page_area_px, 1)
+    base_font = 18 + int(area_ratio * 32)
+    base_font = max(16, min(34, base_font))
+
+    # 情感加成：高情感 → 更大字体（shout 类）
+    if emotion_intensity >= 0.85:
+        base_font += 6
+    elif emotion_intensity >= 0.70:
+        base_font += 3
+
+    # 景别调整
+    shot_key = str(shot_size).lower() if hasattr(shot_size, "value") is False else shot_size
+    multiplier = _SHOT_SIZE_MULTIPLIER.get(shot_key, 1.0)
+    base_font = int(base_font * multiplier)
+    base_font = max(14, min(38, base_font))
+
+    # 按字体大小估算文字像素尺寸
+    text_w, text_h = estimate_text_size(text, base_font, max_width_px=450)
+
+    # 归一化
+    w_norm = text_w / max(inner_w, 1)
+    h_norm = text_h / max(inner_h, 1)
+
+    return w_norm, h_norm, base_font
+
+
+# ---------------------------------------------------------------------------
+# Smart bubble position
+# ---------------------------------------------------------------------------
+
+# 8 个候选位置（比原来的 6 个更丰富）
+_POSITION_CANDIDATES: list[tuple[str, float, float, str]] = [
+    ("top_left",      0.02, 0.02, "down_right"),
+    ("top_right",     0.55, 0.02, "down_left"),
+    ("top_center",    0.25, 0.02, "down"),
+    ("bottom_left",   0.02, 0.65, "up_right"),
+    ("bottom_right",  0.55, 0.65, "up_left"),
+    ("bottom_center", 0.25, 0.65, "up"),
+    ("mid_left",      0.02, 0.35, "right"),
+    ("mid_right",     0.55, 0.35, "left"),
+]
+
+
+def _min_face_distance(
+    bx: float, by: float, bw: float, bh: float,
+    faces: list,
+) -> float:
+    """计算气泡到最近人脸中心的距离（归一化坐标）。"""
+    if not faces:
+        return float("inf")
+    bcx = bx + bw / 2
+    bcy = by + bh / 2
+    best = float("inf")
+    for f in faces:
+        fx = f.x + f.w / 2 if hasattr(f, 'x') else f.get("x", 0) + f.get("w", 0) / 2
+        fy = f.y + f.h / 2 if hasattr(f, 'y') else f.get("y", 0) + f.get("h", 0) / 2
+        dx = bcx - fx
+        dy = bcy - fy
+        dist = (dx * dx + dy * dy) ** 0.5
+        if dist < best:
+            best = dist
+    return best
+
+
+def smart_bubble_position(
+    panel_bbox: "BoundingBox",
+    faces: list,
+    bubble_w: float,
+    bubble_h: float,
+    dialogue_index: int,
+    num_dialogues: int,
+    hint_position: str | None = None,
+) -> tuple[float, float, str]:
+    """根据人脸信息智能选择气泡位置和尾部方向。
+
+    策略：
+    1. 有 BubbleHint 位置 → 优先使用（从 8 个候选位置中匹配或按锚点放置）
+    2. 无人脸 → 按 dialogue_index 分配到不同候选位置，分散放置
+    3. 有人脸 → 选离所有人脸最远的候选位置
+    """
+    if not faces:
+        # 无角色面板：按 dialogue_index 分配分散到不同角落
+        # 如果 hint 提供了位置，匹配到最近的候选位置
+        if hint_position:
+            anchor = _POSITION_ANCHORS.get(hint_position)
+            if anchor:
+                ax = panel_bbox.x + panel_bbox.width * anchor[0]
+                ay = panel_bbox.y + panel_bbox.height * anchor[1]
+                ax = max(panel_bbox.x + 0.01, min(ax, panel_bbox.x + panel_bbox.width - bubble_w - 0.01))
+                ay = max(panel_bbox.y + 0.01, min(ay, panel_bbox.y + panel_bbox.height - bubble_h - 0.01))
+                tail = _derive_tail_direction(ax + bubble_w / 2, ay + bubble_h / 2, panel_bbox)
+                return ax, ay, tail
+
+        idx = dialogue_index % len(_POSITION_CANDIDATES)
+        _label, ax_ratio, ay_ratio, tail = _POSITION_CANDIDATES[idx]
+        bx = panel_bbox.x + panel_bbox.width * ax_ratio
+        by = panel_bbox.y + panel_bbox.height * ay_ratio
+        bx = max(panel_bbox.x + 0.01, min(bx, panel_bbox.x + panel_bbox.width - bubble_w - 0.01))
+        by = max(panel_bbox.y + 0.01, min(by, panel_bbox.y + panel_bbox.height - bubble_h - 0.01))
+        return bx, by, tail
+
+    # 有人脸：找最优候选位置（离所有人脸最远）
+    best_dist = -1.0
+    best = (_POSITION_CANDIDATES[0][1], _POSITION_CANDIDATES[0][2], _POSITION_CANDIDATES[0][3])
+    for _label, ax_ratio, ay_ratio, tail in _POSITION_CANDIDATES:
+        bx = panel_bbox.x + panel_bbox.width * ax_ratio
+        by = panel_bbox.y + panel_bbox.height * ay_ratio
+        bx = max(panel_bbox.x + 0.01, min(bx, panel_bbox.x + panel_bbox.width - bubble_w - 0.01))
+        by = max(panel_bbox.y + 0.01, min(by, panel_bbox.y + panel_bbox.height - bubble_h - 0.01))
+        dist = _min_face_distance(bx, by, bubble_w, bubble_h, faces)
+        if dist > best_dist:
+            best_dist = dist
+            best = (bx, by, tail)
+
+    return best
+
+
+# ---------------------------------------------------------------------------
+# Bubble style parameters
+# ---------------------------------------------------------------------------
+
+def bubble_style_params(bubble_type: str, bubble_area_px: float) -> dict:
+    """根据气泡类型和面积返回样式参数。
+
+    面积越大 → 边框和圆角越大。所有类型统一白底黑框，
+    仅 border/radius/tail 根据面积和类型微调。
+    """
+    # 面积越大 → 边框和圆角越大
+    if bubble_area_px > 80000:
+        border_w, radius, tail = 3, 16, 16
+    elif bubble_area_px > 30000:
+        border_w, radius, tail = 2, 12, 12
+    else:
+        border_w, radius, tail = 1, 8, 8
+
+    # 统一白底黑框，仅 border/radius/tail 按类型微调
+    base = {
+        "fill": [255, 255, 255],
+        "outline": [20, 20, 20],
+        "border": border_w,
+        "radius": radius,
+        "tail": tail,
+    }
+    if bubble_type == "shout":
+        base["border"] = max(2, border_w)
+        base["radius"] = 6
+    elif bubble_type == "narration":
+        base["radius"] = 4
+        base["tail"] = 0
+
+    return base
+
+
+# ---------------------------------------------------------------------------
 # Main entry-point
 # ---------------------------------------------------------------------------
 
@@ -282,6 +475,10 @@ def place_bubbles(
     if faces_by_panel is None:
         faces_by_panel = {}
 
+    inner_w = page_width_px - margin_px * 2
+    inner_h = page_height_px - margin_px * 2
+    use_adaptive = font_size_pt <= 0  # <=0 表示启用自适应尺寸
+
     all_bubbles: list[BubblePlacement] = []
 
     for panel, bbox in zip(panels, panel_bboxes, strict=False):
@@ -289,10 +486,23 @@ def place_bubbles(
         if not dialogues:
             continue
 
+        # 该面板的人脸检测结果
+        panel_faces = faces_by_panel.get(panel.panel_id, [])
+
         # Build hint lookup keyed by dialogue_index
         hint_map: dict[int, BubbleHint] = {}
         for h in panel.speech_bubble_hints:
             hint_map[h.dialogue_index] = h
+
+        # 获取景别和情感（用于自适应尺寸）
+        shot_size = (
+            panel.shot_size.value
+            if hasattr(panel.shot_size, "value")
+            else str(panel.shot_size)
+        )
+        emotion = getattr(panel, "emotion_intensity", 0.5) or 0.5
+
+        num_dialogues = len(dialogues)
 
         # Place each dialogue
         for di, dialogue in enumerate(dialogues):
@@ -301,31 +511,31 @@ def place_bubbles(
             # Resolve bubble type
             bubble_type = _resolve_bubble_type(dialogue, hint)
 
-            # Estimate text size → bubble dimensions in normalised space
-            text_w_px, text_h_px = estimate_text_size(dialogue.text, font_size_pt)
-            # Convert px to normalised using inner dimensions (match compositor)
-            inner_w = page_width_px - margin_px * 2
-            inner_h = page_height_px - margin_px * 2
-            w_norm = text_w_px / max(inner_w, 1)
-            h_norm = text_h_px / max(inner_h, 1)
+            # ---- 尺寸计算 ----
+            if use_adaptive:
+                w_norm, h_norm, bubble_font_pt = calculate_bubble_size(
+                    dialogue.text, bbox, shot_size, emotion,
+                    page_width_px, page_height_px, margin_px,
+                )
+            else:
+                text_w_px, text_h_px = estimate_text_size(dialogue.text, font_size_pt)
+                w_norm = text_w_px / max(inner_w, 1)
+                h_norm = text_h_px / max(inner_h, 1)
+                bubble_font_pt = font_size_pt
 
-            # Get anchor position from hint
-            ax, ay = _bubble_anchor(bbox, hint)
+            # ---- 智能位置选择 ----
+            hint_pos = hint.suggested_position if hint else None
+            bx, by, tail_dir = smart_bubble_position(
+                bbox, panel_faces,
+                w_norm, h_norm,
+                dialogue_index=di,
+                num_dialogues=num_dialogues,
+                hint_position=hint_pos,
+            )
 
-            # Multi-bubble stacking: offset vertically within the panel
-            stack_offset = di * 0.07
-
-            bx = ax
-            by = ay + stack_offset
-
-            # Boundary clamp – keep bubble inside panel bbox
-            bx = max(bbox.x + 0.01, min(bx, bbox.x + bbox.width - w_norm - 0.01))
-            by = max(bbox.y + 0.01, min(by, bbox.y + bbox.height - h_norm - 0.01))
-
-            # Derive tail direction
-            bubble_cx = bx + w_norm / 2
-            bubble_cy = by + h_norm / 2
-            tail_dir = _derive_tail_direction(bubble_cx, bubble_cy, bbox)
+            # ---- 样式参数 ----
+            bubble_area_px = (w_norm * inner_w) * (h_norm * inner_h)
+            style = bubble_style_params(bubble_type, bubble_area_px)
 
             all_bubbles.append(
                 BubblePlacement(
@@ -338,36 +548,11 @@ def place_bubbles(
                     y=by,
                     w=w_norm,
                     h=h_norm,
+                    font_size_pt=bubble_font_pt,
                     occlusion_score=0.0,
                     tail_direction=tail_dir,
+                    style=style,
                 )
             )
-
-    # ---- VLM face-aware optimization ----
-    for panel, bbox in zip(panels, panel_bboxes, strict=False):
-        faces = faces_by_panel.get(panel.panel_id)
-        if not faces:
-            continue
-        # Extract bubbles belonging to this panel
-        panel_bubbles = [b for b in all_bubbles if b.panel_id == panel.panel_id]
-        if not panel_bubbles:
-            continue
-        from .face_detector import FaceRegion, optimize_bubble_positions
-        face_regions = [
-            FaceRegion(x=f.x, y=f.y, w=f.w, h=f.h, char_name=f.char_name)
-            if hasattr(f, 'x') else
-            FaceRegion(
-                x=float(f.get("x", 0)), y=float(f.get("y", 0)),
-                w=float(f.get("w", 0)), h=float(f.get("h", 0)),
-                char_name=str(f.get("char_name", "")),
-            )
-            for f in faces
-        ]
-        optimized = optimize_bubble_positions(panel_bubbles, face_regions, bbox)
-        # Replace in-place
-        for i, b in enumerate(all_bubbles):
-            for ob in optimized:
-                if b.panel_id == ob.panel_id and b.dialogue_index == ob.dialogue_index:
-                    all_bubbles[i] = ob
 
     return all_bubbles

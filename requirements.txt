@@ -9,6 +9,9 @@ typing-extensions>=4.8.0
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
 
+# YOLO 人脸检测
+ultralytics>=8.0.0
+
 # 可选依赖(后续迭代,需要时安装)
 # torch>=2.1.0
 # transformers>=4.40.0
