@@ -85,7 +85,9 @@ class ImageAgent(BaseAgent[ImageInput, ImageOutput]):
 
         if not self.config.image.is_available:
             if self.config.runtime.fallback_to_local:
-                return self._make_placeholder_output(plan, seed, positive, negative)
+                return self._make_placeholder_output(
+                    plan, seed, positive, negative, inputs.width, inputs.height
+                )
             raise ApiBackendError(
                 "Image API is not available — cannot generate panel image"
             )
@@ -95,8 +97,8 @@ class ImageAgent(BaseAgent[ImageInput, ImageOutput]):
             kind="panel",
             prompt=positive,
             negative_prompt=negative,
-            width=1024,
-            height=1024,
+            width=inputs.width,
+            height=inputs.height,
             seed=seed,
             workflow_path=self.config.image.workflow_panel_path,
             metadata={
@@ -122,8 +124,8 @@ class ImageAgent(BaseAgent[ImageInput, ImageOutput]):
             panel_id=plan.panel_id,
             image_path=path,
             image_format="png",
-            width=1024,
-            height=1024,
+            width=inputs.width,
+            height=inputs.height,
             backend=backend_used,
             model_version=model_version,
             seed=seed,
@@ -160,6 +162,7 @@ class ImageAgent(BaseAgent[ImageInput, ImageOutput]):
                 retry_count=context.retry_count,
                 self_check_notes=[
                     f"char={char_id} seed={seed} "
+                    f"size={inputs.width}x{inputs.height} "
                     f"shot={plan.shot_size.value} angle={plan.camera_angle.value} "
                     f"mood={plan.mood} weather={plan.weather} "
                     f"prompt_len={len(positive)}"
@@ -168,15 +171,21 @@ class ImageAgent(BaseAgent[ImageInput, ImageOutput]):
         )
 
     def _make_placeholder_output(
-        self, plan, seed: int, positive: str, negative: str
+        self,
+        plan,
+        seed: int,
+        positive: str,
+        negative: str,
+        width: int,
+        height: int,
     ) -> ImageOutput:
         """Local fallback: return placeholder PanelImage when no image backend."""
         panel_image = PanelImage(
             panel_id=plan.panel_id,
             image_path=f"projects/test/panels/{plan.panel_id}_placeholder.png",
             image_format="png",
-            width=1024,
-            height=1024,
+            width=width,
+            height=height,
             backend="placeholder",
             model_version="local",
             seed=seed,
@@ -209,7 +218,8 @@ class ImageAgent(BaseAgent[ImageInput, ImageOutput]):
     ) -> AsyncIterator[StreamEvent]:
         yield self._make_event(
             StreamEventType.LOG,
-            f"Generating {inputs.panel_plan.panel_id} ({inputs.panel_plan.shot_size.value})...",
+            f"Generating {inputs.panel_plan.panel_id} "
+            f"{inputs.width}x{inputs.height} ({inputs.panel_plan.shot_size.value})...",
         )
         for step in range(0, 5):
             await self._sleep_for_demo(0.08)

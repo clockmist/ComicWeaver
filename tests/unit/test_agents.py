@@ -150,9 +150,11 @@ async def test_image_agent():
             negative_prompt="",
         ),
     )
-    inp = ImageInput(panel_plan=plan, style_preset="manga")
+    inp = ImageInput(panel_plan=plan, style_preset="manga", width=640, height=896)
     out = await agent.run(inp, ctx)
     assert out.panel_image.panel_id == "p001"
+    assert out.panel_image.width == 640
+    assert out.panel_image.height == 896
     assert out.panel_image.image_path
 
 

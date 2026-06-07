@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from PIL import Image, ImageDraw, ImageFont
 
 if TYPE_CHECKING:
-    from comicweaver.core.schema import BoundingBox, PanelImage, ShotSize
+    from comicweaver.core.schema import BoundingBox, PanelImage
 
     from .bubbles import BubblePlacement
 
@@ -149,9 +149,11 @@ def _fit_image(
     src_ratio = src_w / src_h
     tgt_ratio = target_w / target_h
 
-    # If aspect ratios are very close (< 3% diff), stretch is acceptable
+    # If aspect ratios are close, prefer a small resize over cropping content.
+    # Precomputed generation sizes are latent-aligned, so a few percent of
+    # aspect drift can happen after rounding.
     ratio_diff = abs(src_ratio - tgt_ratio) / max(src_ratio, tgt_ratio)
-    if strategy == FitStrategy.STRETCH or ratio_diff < 0.03:
+    if strategy == FitStrategy.STRETCH or ratio_diff < 0.08:
         return img.resize((target_w, target_h), Image.LANCZOS)
 
     if strategy == FitStrategy.CONTAIN:
@@ -513,6 +515,7 @@ def _thought_dot_positions(
     """Compute (x, y) centres for 3 thought-bubble dots."""
     x1, y1, x2, y2 = body
     cx = (x1 + x2) // 2
+    cy = (y1 + y2) // 2
     gap = _THOUGHT_DOT_R * 3
 
     if "down" in direction:

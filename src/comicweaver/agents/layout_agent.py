@@ -38,9 +38,33 @@ from .layout import (
     place_bubbles,
     solve_layout,
 )
-from .layout.face_detector import detect_faces_vlm, optimize_bubble_positions
+from .layout.face_detector import detect_faces_vlm
 from .layout.solver import apply_gutters
 from .layout.templates import LayoutHint
+
+
+def solve_page_bboxes(
+    page,
+    *,
+    page_width_px: int = 1240,
+    page_height_px: int = 1754,
+    margin_px: int = 40,
+    gutter_px: int = 10,
+) -> list[BoundingBox]:
+    """Compute final panel bboxes for a page using the production layout rules."""
+    geometry = PageGeometry(
+        width_px=page_width_px,
+        height_px=page_height_px,
+        margin_px=margin_px,
+        gutter_px=gutter_px,
+    )
+    page_ctx = PageContext(
+        is_climax_page=page.is_climax_page,
+        page_emotion_avg=page.page_emotion_avg,
+    )
+    weights = normalize_weights(page.panels, page_ctx)
+    bboxes = solve_layout(page.panels, weights, hint=_coerce_hint(page.layout_hint))
+    return apply_gutters(bboxes, geometry)
 
 
 class LayoutAgent(BaseAgent[LayoutInput, LayoutOutput]):
@@ -86,30 +110,18 @@ class LayoutAgent(BaseAgent[LayoutInput, LayoutOutput]):
         """Algorithmic layout pipeline (optionally VLM-face-aware)."""
         if faces_by_panel is None:
             faces_by_panel = {}
-        geometry = PageGeometry(
-            width_px=inputs.page_width_px,
-            height_px=inputs.page_height_px,
-            margin_px=inputs.margin_px,
-            gutter_px=inputs.gutter_px,
-        )
-
         final_pages: list[FinalPage] = []
         total_bubbles = 0
 
         for page in inputs.pages:
-            # ---- Step 1: calculate panel weights ----
-            page_ctx = PageContext(
-                is_climax_page=page.is_climax_page,
-                page_emotion_avg=page.page_emotion_avg,
+            # ---- Steps 1-3: calculate weights, solve bboxes, apply gutters ----
+            bboxes = solve_page_bboxes(
+                page,
+                page_width_px=inputs.page_width_px,
+                page_height_px=inputs.page_height_px,
+                margin_px=inputs.margin_px,
+                gutter_px=inputs.gutter_px,
             )
-            weights = normalize_weights(page.panels, page_ctx)
-
-            # ---- Step 2: recursive-partition layout solve ----
-            hint: LayoutHint = _coerce_hint(page.layout_hint)
-            bboxes = solve_layout(page.panels, weights, hint=hint)
-
-            # ---- Step 3: apply gutters ----
-            bboxes = apply_gutters(bboxes, geometry)
 
             # ---- Step 4: place dialogue bubbles ----
             bubbles = place_bubbles(
