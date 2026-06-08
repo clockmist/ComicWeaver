@@ -5,15 +5,19 @@
 2. YOLO 人脸检测 — 识别面板中的人物面部区域
 3. 对每个有对话的面板放置气泡，自动避开人脸
 4. 输出归一化坐标和样式参数，供 LayoutAgent 合成使用
+5. ★v0.3.0: 直接在面板图像上绘制气泡，输出带台词的预览图
 
-当前版本 (v0.2.0) 已集成 YOLO 人脸检测，
-后续版本将加入自适应气泡尺寸和多样化样式。
+当前版本 (v0.3.0) 已集成 YOLO 人脸检测 + 面板级气泡渲染。
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator
+from pathlib import Path
+
+from PIL import Image
 
 from comicweaver.core import (
     AgentContext,
@@ -28,7 +32,8 @@ from comicweaver.core import (
     StreamEventType,
 )
 
-from .layout.bubbles import place_bubbles
+from .layout.bubbles import BubblePlacement, place_bubbles
+from .layout.compositor import render_bubbles_on_panel_image
 from .layout.face_detector import FaceRegion
 from .layout.face_detector_yolo import detect_faces_yolo
 from .layout_agent import solve_page_bboxes
@@ -37,10 +42,10 @@ logger = logging.getLogger(__name__)
 
 
 class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
-    """台词气泡放置 Agent — 计算气泡坐标和样式参数。"""
+    """台词气泡放置 Agent — 计算气泡坐标和样式参数，并生成面板预览图。"""
 
     name = "bubble_agent"
-    version = "0.2.0"
+    version = "0.3.0"
     rubric_id = "rubric_bubble_v1"
 
     async def run(
@@ -52,6 +57,7 @@ class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
 
         # Step 1: 预计算所有页面的 bbox + 收集面板bbox映射
         page_bboxes_map: dict[str, list] = {}
+        panel_bbox_map: dict[str, object] = {}  # panel_id → BoundingBox
         for page in inputs.pages:
             bboxes = solve_page_bboxes(
                 page,
@@ -61,6 +67,8 @@ class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
                 gutter_px=inputs.gutter_px,
             )
             page_bboxes_map[page.page_id] = bboxes
+            for panel, bbox in zip(page.panels, bboxes):
+                panel_bbox_map[panel.panel_id] = bbox
 
         # Step 2: YOLO 人脸检测（并行处理所有有对话的面板）
         faces_by_panel = await self._detect_faces(inputs)
@@ -71,12 +79,11 @@ class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
         )
 
         # Step 3: 按页放置气泡
+        page_bubbles: dict[str, list[BubblePlacement]] = {}  # page_id → bubbles
         for page in inputs.pages:
             page_id = page.page_id
             bboxes = page_bboxes_map[page_id]
 
-            # 放置气泡（传入 YOLO 人脸检测结果以优化位置）
-            # font_size_pt=0 启用自适应尺寸（由 calculate_bubble_size 根据面板大小计算）
             bubbles = place_bubbles(
                 page.panels,
                 bboxes,
@@ -88,7 +95,8 @@ class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
                 faces_by_panel=faces_by_panel,
             )
 
-            # 转为 BubblePlacementResult（供输出和 LayoutAgent 消费）
+            page_bubbles[page_id] = bubbles
+
             results: list[BubblePlacementResult] = []
             for bp in bubbles:
                 panel_faces = faces_by_panel.get(bp.panel_id, [])
@@ -112,7 +120,47 @@ class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
 
             all_placements[page_id] = results
 
-        # 填充 face_detection_stats（panel_id → 人脸数）
+        # Step 4: ★ 在面板图像上实际绘制气泡，生成预览图
+        bubbled_images: dict[str, str] = {}
+        for page in inputs.pages:
+            for panel in page.panels:
+                pid = panel.panel_id
+                panel_img_obj = inputs.panel_images.get(pid)
+                if not panel_img_obj or not panel_img_obj.image_path:
+                    continue
+
+                img_path = panel_img_obj.image_path
+                if not os.path.exists(img_path):
+                    continue
+
+                # 收集该面板的气泡
+                panel_bubbles_list = [
+                    bp for pg_bubbles in page_bubbles.values()
+                    for bp in pg_bubbles
+                    if bp.panel_id == pid
+                ]
+                if not panel_bubbles_list:
+                    continue
+
+                bbox = panel_bbox_map.get(pid)
+                if bbox is None:
+                    continue
+
+                try:
+                    img = Image.open(img_path)
+                    bubbled = render_bubbles_on_panel_image(
+                        img, bbox, panel_bubbles_list,
+                    )
+
+                    # 保存到同目录，加 _bubbled 后缀
+                    out_path = Path(img_path).parent / f"{pid}_bubbled.png"
+                    bubbled.save(str(out_path))
+                    bubbled_images[pid] = str(out_path)
+                    logger.debug("面板 %s 气泡预览图已保存: %s", pid, out_path)
+                except Exception as exc:
+                    logger.warning("面板 %s 气泡渲染失败: %s", pid, exc)
+
+        # 填充 face_detection_stats
         face_stats = {
             panel_id: len(faces)
             for panel_id, faces in faces_by_panel.items()
@@ -122,6 +170,7 @@ class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
             bubble_placements=all_placements,
             total_bubbles=total_bubbles,
             face_detection_stats=face_stats,
+            bubbled_panel_images=bubbled_images,
             meta=AgentOutputMeta(
                 agent=self.name,
                 version=self.version,
@@ -130,6 +179,7 @@ class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
                     f"已放置{total_bubbles}个气泡",
                     f"YOLO 检测到 {total_faces} 张人脸 (分布在 {len(faces_by_panel)} 个面板)",
                     f"页尺寸: {inputs.page_width_px}x{inputs.page_height_px}",
+                    f"已生成 {len(bubbled_images)} 张气泡预览图",
                 ],
             ),
         )
@@ -160,31 +210,50 @@ class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
         if not tasks:
             return {}
 
-        # 并行 YOLO 检测（从 config 读取模型路径和置信度）
+        # 顺序 YOLO 检测 — YOLO 模型不支持多线程并发，必须逐个处理
         yolo_cfg = getattr(self.config, "yolo", None)
         model_path = yolo_cfg.model_path if yolo_cfg else "yolo/face_yolov8n.pt"
-        confidence = yolo_cfg.confidence_threshold if yolo_cfg else 0.3
-        logger.info("开始 YOLO 人脸检测: %d 个面板 (model=%s)", len(tasks), model_path)
-        results = await asyncio.gather(
-            *[
-                detect_faces_yolo(path, model_path=model_path, confidence_threshold=confidence)
-                for path in tasks.values()
-            ],
-            return_exceptions=True,
+        # 漫画/动漫人脸较难检测，默认使用较低置信度阈值
+        confidence = yolo_cfg.confidence_threshold if yolo_cfg else 0.15
+        logger.info(
+            "开始 YOLO 人脸检测: %d 个面板 (model=%s, confidence=%.2f, 顺序处理)",
+            len(tasks), model_path, confidence,
         )
 
-        # 组装结果
+        # 逐个面板检测（线程安全）
         faces_by_panel: dict[str, list[FaceRegion]] = {}
-        for (panel_id, _), result in zip(tasks.items(), results):
-            if isinstance(result, Exception):
-                logger.warning("面板 %s YOLO 检测异常: %s", panel_id, result)
-                faces_by_panel[panel_id] = []
-            else:
+        detected_count = 0
+        failed_count = 0
+        for panel_id, path in tasks.items():
+            try:
+                result = await detect_faces_yolo(
+                    path, model_path=model_path, confidence_threshold=confidence,
+                )
                 faces_by_panel[panel_id] = result
                 if result:
+                    detected_count += 1
                     logger.info(
-                        "面板 %s: 检测到 %d 张人脸", panel_id, len(result)
+                        "面板 %s: 检测到 %d 张人脸 (置信度: %s)",
+                        panel_id, len(result),
+                        ", ".join(f"{f.x:.2f},{f.y:.2f}" for f in result[:3]),
                     )
+            except Exception as exc:
+                logger.warning("面板 %s YOLO 检测异常: %s", panel_id, exc)
+                faces_by_panel[panel_id] = []
+                failed_count += 1
+
+        if failed_count > 0:
+            logger.warning(
+                "⚠️ %d/%d 个面板的人脸检测失败，这些面板将使用纯启发式气泡放置",
+                failed_count, len(tasks),
+            )
+        if detected_count == 0 and failed_count == 0:
+            logger.info(
+                "未检测到任何人脸。可能原因: 1) 漫画风格与训练数据不匹配 "
+                "2) 面板中人脸过小 3) 置信度阈值 %.2f 偏高。"
+                "气泡将使用纯启发式放置。",
+                confidence,
+            )
 
         return faces_by_panel
 
@@ -224,7 +293,10 @@ class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
         output = await self.run(inputs, context)
         yield self._make_event(
             StreamEventType.PARTIAL_OUTPUT,
-            {"total_bubbles": output.total_bubbles},
+            {
+                "total_bubbles": output.total_bubbles,
+                "bubbled_images": len(output.bubbled_panel_images),
+            },
         )
         yield self._make_event(StreamEventType.PROGRESS, 1.0)
         yield self._make_event(StreamEventType.DONE, output.model_dump())

@@ -1,13 +1,16 @@
-"""结构化开发者日志。
+"""结构化开发者日志 — 增强中文可读性版本。
 
 通过 LangGraph 的 get_stream_writer() 通道发射 DevLogEntry，
 在 UI 的 "开发者日志" Tab 中分类展示。
+
+v2.0: 所有日志消息增加中文标注，提供 write_dev_log_to_file() 持久化。
 """
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 
@@ -31,6 +34,65 @@ class DevLogCategory(str, Enum):
     WORKFLOW = "workflow"
 
 
+# ── 中英文标签映射 ──────────────────────────────────────────────
+
+_AGENT_CN: dict[str, str] = {
+    "story_agent": "故事创作Agent",
+    "character_agent": "角色设计Agent",
+    "script_agent": "剧本生成Agent",
+    "storyboard_agent": "分镜规划Agent",
+    "image_agent": "图像生成Agent",
+    "bubble_agent": "台词气泡Agent",
+    "layout_agent": "排版合成Agent",
+    "reviewer_agent": "审查Agent",
+    "workflow": "工作流引擎",
+}
+
+_CATEGORY_CN: dict[str, str] = {
+    "agent_input": "📥 输入参数",
+    "agent_output": "📤 输出结果",
+    "state_change": "🔄 状态变更",
+    "review_decision": "🔍 审查决策",
+    "error": "❌ 错误",
+    "performance": "⏱ 性能计时",
+    "checkpoint": "⏸ 用户确认",
+    "workflow": "📋 工作流事件",
+}
+
+_LEVEL_CN: dict[str, str] = {
+    "trace": "追踪",
+    "debug": "调试",
+    "info": "信息",
+    "warn": "警告",
+    "error": "错误",
+    "perf": "性能",
+}
+
+_KIND_CN: dict[str, str] = {
+    "character_reference": "角色参考图",
+    "character_expression": "角色表情图",
+    "character_pose": "角色姿态图",
+    "panel": "面板图",
+    "panel_retry": "面板重试",
+    "cover": "封面图",
+}
+
+
+def _agent_label(agent: str) -> str:
+    """获取 Agent 的中文标签。"""
+    return _AGENT_CN.get(agent, agent)
+
+
+def _category_label(category: str) -> str:
+    """获取分类的中文标签。"""
+    return _CATEGORY_CN.get(category, category)
+
+
+def _level_label(level: str) -> str:
+    """获取级别的中文标签。"""
+    return _LEVEL_CN.get(level, level)
+
+
 @dataclass
 class DevLogEntry:
     """一条结构化开发者日志条目。
@@ -39,8 +101,8 @@ class DevLogEntry:
     """
     level: DevLogLevel
     category: DevLogCategory
-    agent: str                     # 关联的 agent 名称（workflow 级别用 "workflow"）
-    message: str                   # 人类可读的摘要
+    agent: str                     # 关联的 agent 名称
+    message: str                   # 人类可读的摘要（含中文标注）
     data: dict[str, Any] = field(default_factory=dict)  # 结构化详情
     timestamp: float = field(default_factory=time.time)
     duration_ms: float = 0.0       # 仅 PERFORMANCE 类别有意义
@@ -68,6 +130,49 @@ class DevLogEntry:
             duration_ms=d.get("duration_ms", 0.0),
         )
 
+    def to_readable_line(self) -> str:
+        """将日志条目格式化为一条人类可读的中文文本行。"""
+        ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.timestamp))
+        cat_label = _category_label(self.category.value)
+        agent_label = _agent_label(self.agent)
+        level_label = _level_label(self.level.value)
+        dur = f" [{self.duration_ms:.0f}ms]" if self.duration_ms > 0 else ""
+
+        line = f"[{ts}] {cat_label} [{agent_label}] [{level_label}] {self.message}{dur}"
+
+        # 附加关键数据摘要
+        if self.data:
+            key_info = _extract_key_info(self.data)
+            if key_info:
+                line += f"  |  {key_info}"
+
+        return line
+
+
+def _extract_key_info(data: dict, max_len: int = 120) -> str:
+    """从日志 data 中提取关键信息摘要。"""
+    parts = []
+    # 优先展示这些字段
+    priority_keys = [
+        "page_count", "panel_count", "character_count", "total_bubbles",
+        "decision", "score", "duration_ms", "retry_count", "status",
+        "total_panels", "title", "operation", "backend", "seed",
+    ]
+    for k in priority_keys:
+        if k in data:
+            v = data[k]
+            if isinstance(v, float):
+                parts.append(f"{k}={v:.1f}")
+            else:
+                parts.append(f"{k}={v}")
+
+    # 如果有 error 相关信息优先展示
+    if "error_type" in data:
+        parts.append(f"错误类型={data['error_type']}")
+
+    result = ", ".join(parts[:8])
+    return result[:max_len]
+
 
 # ============================================================================
 # 工厂函数 —— 便捷创建各类型日志条目
@@ -75,67 +180,105 @@ class DevLogEntry:
 
 
 def log_agent_input(agent: str, input_data: dict) -> DevLogEntry:
-    """Agent 输入日志。"""
-    # 截断过长的文本字段以便日志可读
+    """记录 Agent 输入参数（含中文标签）。"""
+    agent_cn = _agent_label(agent)
     display = {}
     for k, v in input_data.items():
         if isinstance(v, str) and len(v) > 200:
             display[k] = v[:200] + f"... [{len(v)} chars]"
         elif isinstance(v, list):
-            display[k] = f"[{len(v)} items]"
+            display[k] = f"[{len(v)} 项]"
         elif isinstance(v, dict) and len(v) > 10:
-            display[k] = f"{{... {len(v)} keys}}"
+            display[k] = f"{{... {len(v)} 个键}}"
         else:
             display[k] = v
+
+    # 构建中文摘要
+    info_parts = []
+    for k, v in display.items():
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            info_parts.append(f"{k}={v}")
+        elif isinstance(v, str) and not v.startswith("["):
+            info_parts.append(f"{k}={v[:60]}")
+
+    summary = f"{agent_cn} 接收输入参数"
+    if info_parts:
+        summary += f" ({', '.join(info_parts[:4])})"
+
     return DevLogEntry(
         level=DevLogLevel.DEBUG,
         category=DevLogCategory.AGENT_INPUT,
         agent=agent,
-        message=f"{agent} 输入参数",
+        message=summary,
         data=display,
     )
 
 
 def log_agent_output(agent: str, output_summary: dict) -> DevLogEntry:
-    """Agent 输出摘要日志。"""
+    """记录 Agent 输出摘要（含中文标签）。"""
+    agent_cn = _agent_label(agent)
+
+    # 从输出摘要构建一句话描述
+    desc_parts = []
+    if "title" in output_summary:
+        desc_parts.append(f"标题「{output_summary['title']}」")
+    if "page_count" in output_summary:
+        desc_parts.append(f"{output_summary['page_count']}页")
+    if "panel_count" in output_summary or "total_panels" in output_summary:
+        desc_parts.append(f"{output_summary.get('panel_count', output_summary.get('total_panels', 0))}格")
+    if "character_count" in output_summary:
+        desc_parts.append(f"{output_summary['character_count']}个角色")
+    if "total_bubbles" in output_summary:
+        desc_parts.append(f"{output_summary['total_bubbles']}个气泡")
+
+    desc = "，".join(desc_parts) if desc_parts else "输出完成"
     return DevLogEntry(
         level=DevLogLevel.DEBUG,
         category=DevLogCategory.AGENT_OUTPUT,
         agent=agent,
-        message=f"{agent} 输出结果",
+        message=f"{agent_cn} 输出结果: {desc}",
         data=output_summary,
     )
 
 
 def log_agent_error(agent: str, error: str, context: dict | None = None) -> DevLogEntry:
-    """Agent 错误日志。"""
+    """记录 Agent 错误（含中文标签）。"""
+    agent_cn = _agent_label(agent)
     return DevLogEntry(
         level=DevLogLevel.ERROR,
         category=DevLogCategory.ERROR,
         agent=agent,
-        message=f"{agent} 出错: {error[:120]}",
+        message=f"{agent_cn} 出错: {error[:120]}",
         data=context or {},
     )
 
 
 def log_fallback(agent: str, from_backend: str, to_backend: str) -> DevLogEntry:
-    """Fallback 降级日志。"""
+    """记录后端降级（含中文标签）。"""
+    agent_cn = _agent_label(agent)
     return DevLogEntry(
         level=DevLogLevel.WARN,
         category=DevLogCategory.AGENT_OUTPUT,
         agent=agent,
-        message=f"{agent} 回退: {from_backend} → {to_backend}",
+        message=f"{agent_cn} 后端降级: {from_backend} → {to_backend}",
         data={"from": from_backend, "to": to_backend},
     )
 
 
 def log_state_change(from_phase: str, to_phase: str) -> DevLogEntry:
-    """状态转换日志。"""
+    """记录工作流阶段转换（含中文标签）。"""
+    phase_cn = {
+        "init": "初始化", "story": "故事创作", "character": "角色设计",
+        "script": "剧本生成", "storyboard": "分镜规划", "image": "图像生成",
+        "bubble": "台词气泡", "layout": "排版合成",
+    }
+    from_label = phase_cn.get(from_phase, from_phase)
+    to_label = phase_cn.get(to_phase, to_phase)
     return DevLogEntry(
         level=DevLogLevel.INFO,
         category=DevLogCategory.STATE_CHANGE,
         agent="workflow",
-        message=f"阶段转换: {from_phase} → {to_phase}",
+        message=f"工作流阶段切换: {from_label} → {to_label}",
         data={"from": from_phase, "to": to_phase},
     )
 
@@ -143,12 +286,14 @@ def log_state_change(from_phase: str, to_phase: str) -> DevLogEntry:
 def log_review(agent: str, decision: str, score: float,
                dimension_scores: dict | None = None,
                issues: list | None = None) -> DevLogEntry:
-    """审查决策日志。"""
+    """记录审查决策（含中文标签）。"""
+    agent_cn = _agent_label(agent)
+    decision_cn = {"pass": "✅ 通过", "revise": "🔄 需修改", "escalate": "⚠️ 升级"}.get(decision, decision)
     return DevLogEntry(
         level=DevLogLevel.INFO,
         category=DevLogCategory.REVIEW_DECISION,
         agent=agent,
-        message=f"审查 {agent}: {decision} (score={score:.1f})",
+        message=f"审查 {agent_cn}: {decision_cn} (评分={score:.1f})",
         data={
             "decision": decision,
             "score": score,
@@ -160,12 +305,15 @@ def log_review(agent: str, decision: str, score: float,
 
 def log_performance(agent: str, duration_ms: float, retry_count: int = 0,
                     status: str = "ok") -> DevLogEntry:
-    """性能计时日志。"""
+    """记录性能计时（含中文标签）。"""
+    agent_cn = _agent_label(agent)
+    status_cn = {"ok": "正常", "partial": "部分完成"}.get(status, status)
+    dur_str = f"{duration_ms:.0f}ms" if duration_ms < 1000 else f"{duration_ms / 1000:.1f}s"
     return DevLogEntry(
         level=DevLogLevel.PERF,
         category=DevLogCategory.PERFORMANCE,
         agent=agent,
-        message=f"{agent}: {duration_ms:.0f}ms (重试{retry_count}次, {status})",
+        message=f"{agent_cn}: 耗时 {dur_str} (重试{retry_count}次, {status_cn})",
         duration_ms=duration_ms,
         data={
             "agent": agent,
@@ -177,12 +325,23 @@ def log_performance(agent: str, duration_ms: float, retry_count: int = 0,
 
 
 def log_checkpoint(checkpoint_id: str, decision: str) -> DevLogEntry:
-    """确认点交互日志。"""
+    """记录用户确认点交互（含中文标签）。"""
+    checkpoints_cn = {
+        "after_story": "故事确认",
+        "after_character": "角色设计确认",
+        "after_script": "剧本确认",
+        "after_storyboard": "分镜确认",
+        "after_image": "图像确认",
+        "after_bubble": "台词气泡确认",
+        "after_layout": "排版确认",
+    }
+    cp_label = checkpoints_cn.get(checkpoint_id, checkpoint_id)
+    decision_cn = {"accept": "接受并继续", "regenerate": "重新生成"}.get(decision, decision)
     return DevLogEntry(
         level=DevLogLevel.INFO,
         category=DevLogCategory.CHECKPOINT,
         agent="workflow",
-        message=f"确认点 {checkpoint_id}: 用户选择了 {decision}",
+        message=f"确认点「{cp_label}」: 用户选择了「{decision_cn}」",
         data={"checkpoint_id": checkpoint_id, "decision": decision},
     )
 
@@ -191,14 +350,16 @@ def log_comfyui_request(agent: str, kind: str, prompt: str,
                        negative_prompt: str, seed: int, width: int,
                        height: int, workflow_path: str,
                        metadata: dict | None = None) -> DevLogEntry:
-    """记录发送给 ComfyUI 的完整生图参数。"""
+    """记录发送给 ComfyUI 的完整生图参数（含中文标签）。"""
+    kind_cn = _KIND_CN.get(kind, kind)
     return DevLogEntry(
         level=DevLogLevel.INFO,
         category=DevLogCategory.AGENT_OUTPUT,
         agent=agent,
-        message=f"🎨 ComfyUI 生图请求 [{kind}] seed={seed} {width}×{height}",
+        message=f"🎨 ComfyUI 生图请求 [{kind_cn}] seed={seed} {width}×{height}",
         data={
             "kind": kind,
+            "kind_cn": kind_cn,
             "prompt": prompt,
             "negative_prompt": negative_prompt,
             "seed": seed,
@@ -212,14 +373,16 @@ def log_comfyui_request(agent: str, kind: str, prompt: str,
 
 def log_comfyui_response(agent: str, kind: str, image_path: str,
                          backend: str, seed: int) -> DevLogEntry:
-    """记录 ComfyUI 生图结果。"""
+    """记录 ComfyUI 生图结果（含中文标签）。"""
+    kind_cn = _KIND_CN.get(kind, kind)
     return DevLogEntry(
         level=DevLogLevel.INFO,
         category=DevLogCategory.AGENT_OUTPUT,
         agent=agent,
-        message=f"✅ ComfyUI 生图完成 [{kind}] backend={backend} seed={seed}",
+        message=f"✅ ComfyUI 生图完成 [{kind_cn}] backend={backend} seed={seed}",
         data={
             "kind": kind,
+            "kind_cn": kind_cn,
             "image_path": image_path,
             "backend": backend,
             "seed": seed,
@@ -228,12 +391,17 @@ def log_comfyui_response(agent: str, kind: str, image_path: str,
 
 
 def log_workflow_event(event: str, detail: str = "") -> DevLogEntry:
-    """工作流级别事件日志。"""
+    """记录工作流级别事件（含中文标签）。"""
+    event_cn = {
+        "进入阶段": "进入新阶段",
+        "阶段完成": "阶段完成",
+        "用户指导": "用户提供指导",
+    }.get(event, event)
     return DevLogEntry(
         level=DevLogLevel.INFO,
         category=DevLogCategory.WORKFLOW,
         agent="workflow",
-        message=event + (f": {detail}" if detail else ""),
+        message=f"工作流事件: {event_cn}" + (f" — {detail}" if detail else ""),
         data={"event": event, "detail": detail},
     )
 
@@ -250,7 +418,6 @@ def summarize_script_output(output: dict) -> dict:
     for page in pages:
         all_panels.extend(page.get("panels", []))
 
-    # v1.0: 从面板中提取所有出现的角色 ID（去重）
     char_ids_in_panels: set[str] = set()
     for p in all_panels:
         cid = p.get("character_id", "")
@@ -265,7 +432,7 @@ def summarize_script_output(output: dict) -> dict:
         "panel_count": len(all_panels),
         "character_count": max(
             len(char_ids_in_panels),
-            len(output.get("characters", [])),   # 旧格式兼容
+            len(output.get("characters", [])),
         ),
         "panel_locations": list({
             p.get("location", "?")
@@ -396,7 +563,6 @@ def summarize_bubble_output(output: dict) -> dict:
     total = output.get("total_bubbles", 0)
     face_stats = output.get("face_detection_stats", {})
 
-    # 按面板汇总
     panel_summary = {}
     for page_id, bubbles in placements.items():
         for b in bubbles:
@@ -446,3 +612,83 @@ def summarize_review_output(output: dict) -> dict:
             "suggested_action": es.get("suggested_action", ""),
         } if es else None,
     }
+
+
+# ============================================================================
+# 持久化日志文件 —— 将内存中的 dev_log 写入可读文本文件
+# ============================================================================
+
+
+def write_dev_log_to_file(dev_entries: list[dict], project_dir: str | Path) -> Path | None:
+    """将开发者日志条目写入项目目录下的 dev_log.txt 文件。
+
+    每条日志格式化为一行带中文标注的可读文本，按 Agent 分段。
+    文件路径: {project_dir}/dev_log.txt
+
+    Args:
+        dev_entries: DevLogEntry.to_dict() 的列表
+        project_dir: 项目目录路径
+
+    Returns:
+        写入的文件路径，如果列表为空则返回 None
+    """
+    if not dev_entries:
+        return None
+
+    project_dir = Path(project_dir)
+    project_dir.mkdir(parents=True, exist_ok=True)
+    log_path = project_dir / "dev_log.txt"
+
+    lines: list[str] = []
+    lines.append("=" * 80)
+    lines.append("  ComicWeaver 开发者日志 — 按 Agent 分段展示")
+    lines.append(f"  生成时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    lines.append(f"  总条目数: {len(dev_entries)}")
+    lines.append("=" * 80)
+    lines.append("")
+
+    # 按 Agent 分组
+    last_agent = ""
+    for i, e in enumerate(dev_entries):
+        agent = e.get("agent", "workflow")
+        if agent != last_agent:
+            agent_cn = _agent_label(agent)
+            lines.append("")
+            lines.append(f"{'─' * 60}")
+            lines.append(f"  【{agent_cn}】({agent}) 的日志")
+            lines.append(f"{'─' * 60}")
+            last_agent = agent
+
+        ts = time.strftime("%H:%M:%S", time.localtime(e.get("timestamp", time.time())))
+        cat_cn = _category_label(e.get("category", ""))
+        lvl_cn = _level_label(e.get("level", "info"))
+        msg = e.get("message", "")
+
+        line = f"  [{ts}] [{lvl_cn}] {cat_cn}  {msg}"
+
+        dur = e.get("duration_ms", 0)
+        if dur > 0:
+            dur_str = f"{dur:.0f}ms" if dur < 1000 else f"{dur / 1000:.1f}s"
+            line += f"  (耗时: {dur_str})"
+
+        lines.append(line)
+
+        # 重要数据缩进展示
+        data = e.get("data", {})
+        if data:
+            for k in ("page_count", "panel_count", "character_count",
+                      "total_bubbles", "decision", "score", "status"):
+                if k in data:
+                    v = data[k]
+                    if isinstance(v, float):
+                        lines.append(f"        ↳ {k} = {v:.2f}")
+                    else:
+                        lines.append(f"        ↳ {k} = {v}")
+
+    lines.append("")
+    lines.append("=" * 80)
+    lines.append("  日志结束")
+    lines.append("=" * 80)
+
+    log_path.write_text("\n".join(lines), encoding="utf-8")
+    return log_path

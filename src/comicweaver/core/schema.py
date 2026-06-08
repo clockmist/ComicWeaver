@@ -588,8 +588,9 @@ class BubbleOutput(BaseModel):
     bubble_placements: dict[str, list[BubblePlacementResult]] = Field(default_factory=dict)
     total_bubbles: int = 0
     face_detection_stats: dict[str, int] = Field(default_factory=dict)
+    bubbled_panel_images: dict[str, str] = Field(default_factory=dict)  # panel_id → 带气泡的预览图路径
     meta: AgentOutputMeta = Field(default_factory=lambda: AgentOutputMeta(
-        agent="bubble_agent", version="0.1.0"
+        agent="bubble_agent", version="0.3.0"
     ))
 
 

@@ -37,6 +37,16 @@ def render_dev_log(dev_entries: list[dict], filter_category: str = "all",
         "checkpoint": "#f97316",
         "workflow": "#64748b",
     }
+    cat_labels: dict[str, str] = {
+        "agent_input": "📥 输入",
+        "agent_output": "📤 输出",
+        "state_change": "🔄 状态",
+        "review_decision": "🔍 审查",
+        "error": "❌ 错误",
+        "performance": "⏱ 性能",
+        "checkpoint": "⏸ 确认",
+        "workflow": "📋 流程",
+    }
     level_icons: dict[str, str] = {
         "trace": "·",
         "debug": "🔍",
@@ -44,6 +54,25 @@ def render_dev_log(dev_entries: list[dict], filter_category: str = "all",
         "warn": "⚠️",
         "error": "❌",
         "perf": "⏱",
+    }
+    level_labels: dict[str, str] = {
+        "trace": "追踪",
+        "debug": "调试",
+        "info": "信息",
+        "warn": "警告",
+        "error": "错误",
+        "perf": "性能",
+    }
+    agent_labels: dict[str, str] = {
+        "story_agent": "故事创作",
+        "character_agent": "角色设计",
+        "script_agent": "剧本生成",
+        "storyboard_agent": "分镜规划",
+        "image_agent": "图像生成",
+        "bubble_agent": "台词气泡",
+        "layout_agent": "排版合成",
+        "reviewer_agent": "审查",
+        "workflow": "工作流",
     }
 
     lines = []
@@ -57,6 +86,11 @@ def render_dev_log(dev_entries: list[dict], filter_category: str = "all",
         dur_str = f" [{dur:.0f}ms]" if dur > 0 else ""
         color = cat_colors.get(cat, "#94a3b8")
         icon = level_icons.get(lvl, "·")
+
+        # 中文标签
+        cat_label = cat_labels.get(cat, cat)
+        lvl_label = level_labels.get(lvl, lvl)
+        agent_label = agent_labels.get(agent, agent)
 
         data_dict = e.get("data", {})
         data_json = json.dumps(data_dict, ensure_ascii=False, default=str) if data_dict else ""
@@ -74,8 +108,8 @@ def render_dev_log(dev_entries: list[dict], filter_category: str = "all",
         lines.append(
             f'<div style="padding:3px 0;border-bottom:1px solid #f1f5f9;font-size:12px;">'
             f'<span style="color:#94a3b8;">{ts}</span> '
-            f'<span style="color:{color};font-weight:600;">{icon} [{cat}]</span> '
-            f'<span style="color:#1e293b;">[{html_mod.escape(agent)}]</span> '
+            f'<span style="color:{color};font-weight:600;" title="{html_mod.escape(lvl_label)}">{icon} {html_mod.escape(cat_label)}</span> '
+            f'<span style="color:#1e293b;" title="{html_mod.escape(agent)}">[{html_mod.escape(agent_label)}]</span> '
             f'{msg}{dur_str}'
             f'{data_preview}'
             f'</div>'

@@ -336,6 +336,90 @@ def compose_page(
     return str(out_path)
 
 
+# ---------------------------------------------------------------------------
+# Single-panel bubble rendering — 在单张面板图像上直接绘制气泡
+# ---------------------------------------------------------------------------
+
+
+def render_bubbles_on_panel_image(
+    panel_img: Image.Image,
+    panel_bbox,          # BoundingBox — 面板在页面内区的位置（归一化 0-1）
+    bubbles: list,       # list[BubblePlacement] — 该面板的气泡（页面归一化坐标）
+) -> Image.Image:
+    """在单张面板图像上直接绘制台词气泡，返回修改后的图像。
+
+    气泡坐标从页面归一化空间（0-1，相对于页面内区）转换到
+    面板像素空间。使用 compositor 内置的绘制函数，与最终排版
+    合成效果一致。
+
+    参数
+    ----------
+    panel_img : PIL Image
+        原始面板图像（RGB 或 RGBA）。
+    panel_bbox : BoundingBox
+        面板在页面内区的位置（x, y, width, height 均为 0-1 归一化值）。
+    bubbles : list[BubblePlacement]
+        该面板的气泡放置结果（坐标相对于页面内区，0-1 归一化）。
+
+    返回
+    -------
+    Image.Image
+        绘制了气泡后的面板图像（RGBA 模式以支持透明气泡效果）。
+    """
+    # 转为 RGBA 以支持半透明效果
+    if panel_img.mode != "RGBA":
+        panel_img = panel_img.convert("RGBA")
+
+    img_w, img_h = panel_img.size
+    draw = ImageDraw.Draw(panel_img)
+
+    bbox_x = panel_bbox.x
+    bbox_y = panel_bbox.y
+    bbox_w = panel_bbox.width
+    bbox_h = panel_bbox.height
+
+    if bbox_w <= 0 or bbox_h <= 0:
+        return panel_img
+
+    for bp in bubbles:
+        # 页面归一化 → 面板像素坐标
+        rel_x = (bp.x - bbox_x) / bbox_w
+        rel_y = (bp.y - bbox_y) / bbox_h
+        rel_w = bp.w / bbox_w
+        rel_h = bp.h / bbox_h
+
+        px = int(rel_x * img_w)
+        py = int(rel_y * img_h)
+        pw = int(rel_w * img_w)
+        ph = int(rel_h * img_h)
+
+        # 裁剪到图像边界内
+        px = max(0, px)
+        py = max(0, py)
+        pw = min(pw, img_w - px)
+        ph = min(ph, img_h - py)
+
+        if pw < 10 or ph < 10:
+            continue
+
+        body = (px, py, px + pw, py + ph)
+
+        # 分发到类型专属绘制函数
+        bp_type = getattr(bp, 'bubble_type', 'speech')
+        if bp_type == "thought":
+            _draw_thought(draw, body, bp, (255, 255, 255), getattr(bp, 'font_size_pt', 14))
+        elif bp_type == "shout":
+            _draw_shout(draw, body, bp, (255, 255, 255), getattr(bp, 'font_size_pt', 14))
+        elif bp_type == "whisper":
+            _draw_whisper(draw, body, bp, (255, 255, 255), getattr(bp, 'font_size_pt', 14))
+        elif bp_type == "narration":
+            _draw_narration(draw, body, bp, getattr(bp, 'font_size_pt', 14))
+        else:
+            _draw_speech(draw, body, bp, getattr(bp, 'font_size_pt', 14))
+
+    return panel_img
+
+
 def _draw_placeholder(
     draw: ImageDraw.ImageDraw,
     panel_id: str,

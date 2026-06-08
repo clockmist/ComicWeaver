@@ -9,7 +9,7 @@ import gradio as gr
 
 from comicweaver.core import ComicState
 from comicweaver.orchestrator import CheckpointSignal, ComicWorkflow, WorkflowEvent
-from comicweaver.storage import save_project, state_to_project
+from comicweaver.storage import save_dev_log, save_project, state_to_project
 from comicweaver.utils.logging import DevLogEntry
 
 from ..composables.live import render_live_content, render_phase_text_content
@@ -59,14 +59,14 @@ _PHASE_CLEAR_FIELDS: dict[str, list[str]] = {
     "storyboard": [
         "storyboard_plan", "layout_grids",
         "panel_images", "generation_metadata",
-        "bubble_placements", "final_pages", "exports",
+        "bubble_placements", "bubbled_panel_images", "final_pages", "exports",
     ],
     "image": [
         "panel_images", "generation_metadata",
-        "bubble_placements", "final_pages", "exports",
+        "bubble_placements", "bubbled_panel_images", "final_pages", "exports",
     ],
     "bubble": [
-        "bubble_placements",
+        "bubble_placements", "bubbled_panel_images",
         "final_pages", "exports",
     ],
     "layout": [
@@ -204,6 +204,9 @@ async def _consume_workflow(session: Session) -> None:
                     if session.state:
                         proj = state_to_project(session.state)
                         save_project(proj)
+                        # 同时持久化开发者日志为可读文本文件
+                        if session.dev_log:
+                            save_dev_log(session.dev_log, session.state.get("project_id", "unknown"))
                 continue
 
             if isinstance(msg, DevLogEntry):
@@ -269,10 +272,7 @@ async def _consume_workflow(session: Session) -> None:
                                     session.state["storyboard_plan"] = pages
                             elif agent_name == "bubble_agent":
                                 session.state["bubble_placements"] = content.get("bubble_placements", {})
-                                # 气泡结果也加入面板预览以供右侧气泡图像展示
-                                for bp_data in content.get("bubble_placements", {}).values():
-                                    for b_raw in (bp_data if isinstance(bp_data, list) else []):
-                                        pass  # 气泡数据已同步到 state
+                                session.state["bubbled_panel_images"] = content.get("bubbled_panel_images", {})
                             elif agent_name == "layout_agent":
                                 session.state["final_pages"] = content.get("final_pages", [])
                                 session.state["exports"] = content.get("exports", [])
@@ -503,6 +503,7 @@ def respond_checkpoint(decision: str, guidance: str = "") -> Iterator[tuple]:
             SESSION.state["bubble_placements"] = {}  # 图像重生成后气泡也需重新计算
         elif cp_id == "after_bubble":
             SESSION.state["bubble_placements"] = {}
+            SESSION.state["bubbled_panel_images"] = {}
         elif cp_id == "after_layout":
             SESSION.state["final_pages"] = []
             SESSION.state["exports"] = []

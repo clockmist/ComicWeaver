@@ -53,10 +53,11 @@ def render_phase_text_content(state: dict | None, agent_outputs: dict[str, list[
     if panel_images:
         parts.append(_render_detailed_images(panel_images))
 
-    # 6. 台词气泡阶段（含面板缩略图）
+    # 6. 台词气泡阶段（含面板缩略图 + 带气泡的预览图）
     bubble_placements = state.get("bubble_placements", {})
     if bubble_placements:
-        parts.append(_render_bubble_summary(bubble_placements, panel_images))
+        bubbled_images = state.get("bubbled_panel_images", {})
+        parts.append(_render_bubble_summary(bubble_placements, panel_images, bubbled_images))
 
     # 7. 排版阶段
     final_pages = state.get("final_pages", [])

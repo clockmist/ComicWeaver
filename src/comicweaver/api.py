@@ -215,10 +215,21 @@ class ImageGenerationResponse(BaseModel):
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
-def _write_generation_log(request: ImageGenerationRequest, workflow_path: Path) -> None:
-    """Write the exact seed + prompt to a generation log file in the project dir.
+# 生图类型中文映射
+_KIND_CN_MAP: dict[str, str] = {
+    "character_reference": "角色参考图",
+    "character_expression": "角色表情图",
+    "character_pose": "角色姿态图",
+    "panel": "面板图像",
+    "panel_retry": "面板重试",
+    "cover": "封面图",
+}
 
-    This makes it easy for the user to copy-paste parameters for manual ComfyUI testing.
+
+def _write_generation_log(request: ImageGenerationRequest, workflow_path: Path) -> None:
+    """将生图请求的种子、提示词等参数写入项目目录下的生成日志文件。
+
+    使用中文标签增强可读性，便于用户复制参数到 ComfyUI 手动测试。
     """
     out_dir = project_dir(request.project_id)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -226,17 +237,18 @@ def _write_generation_log(request: ImageGenerationRequest, workflow_path: Path) 
 
     panel_id = request.metadata.get("panel_id") or request.metadata.get("char_id") or "?"
     ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    kind_cn = _KIND_CN_MAP.get(request.kind, request.kind)
 
     entry = (
         f"{'=' * 80}\n"
-        f"[{ts}]  kind={request.kind}  id={panel_id}\n"
-        f"workflow: {workflow_path}\n"
-        f"seed:     {request.seed}\n"
-        f"size:     {request.width} x {request.height}\n"
+        f"[{ts}]  类型={kind_cn} (kind={request.kind})  面板ID={panel_id}\n"
+        f"工作流文件: {workflow_path}\n"
+        f"随机种子:      {request.seed}\n"
+        f"图像尺寸:      {request.width} × {request.height}\n"
         f"{'─' * 80}\n"
-        f"POSITIVE:\n{request.prompt}\n"
+        f"正向提示词 (POSITIVE):\n{request.prompt}\n"
         f"{'─' * 80}\n"
-        f"NEGATIVE:\n{request.negative_prompt}\n"
+        f"反向提示词 (NEGATIVE):\n{request.negative_prompt}\n"
         f"{'=' * 80}\n\n"
     )
     with open(log_path, "a", encoding="utf-8") as f:

@@ -8,6 +8,7 @@ from .project import (
     list_projects,
     load_project,
     project_to_state,
+    save_dev_log,
     save_project,
     state_to_project,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "list_projects",
     "load_project",
     "project_to_state",
+    "save_dev_log",
     "save_project",
     "state_to_project",
 ]

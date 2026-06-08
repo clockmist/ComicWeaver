@@ -1,4 +1,7 @@
-"""轻量级项目持久化 - JSON文件,真实版本可换 SQLite。"""
+"""轻量级项目持久化 - JSON文件,真实版本可换 SQLite。
+
+v2.0: 新增 save_dev_log() 将开发者日志持久化为可读文本文件。
+"""
 from __future__ import annotations
 
 import time
@@ -58,3 +61,24 @@ def state_to_project(state: ComicState, title: str = "") -> ComicProject:
         ),
         state=dict(state),
     )
+
+
+def save_dev_log(dev_entries: list[dict], project_id: str) -> Path | None:
+    """将开发者日志条目写入项目目录下的 dev_log.txt 文件。
+
+    每条日志按 Agent 分段，带中文标注，便于快速定位各 Agent 的输出内容。
+
+    Args:
+        dev_entries: DevLogEntry.to_dict() 的列表
+        project_id: 项目ID
+
+    Returns:
+        写入的文件路径，如果列表为空则返回 None
+    """
+    if not dev_entries:
+        return None
+
+    from comicweaver.utils.logging import write_dev_log_to_file
+
+    proj_dir = project_dir(project_id)
+    return write_dev_log_to_file(dev_entries, proj_dir)

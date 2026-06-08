@@ -31,4 +31,4 @@ runtime:
 
 yolo:
   model_path: "yolo/face_yolov8n.pt"
-  confidence_threshold: 0.3
+  confidence_threshold: 0.15
