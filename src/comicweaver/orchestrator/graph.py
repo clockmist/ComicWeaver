@@ -547,9 +547,7 @@ class ComicWorkflow:
             "layout_precomputed": True,
         }))
 
-        # v0.5: 选择性重新生成 — 使用 while 循环支持 checkpoint 重回
-        import re as _re
-
+        # v0.6: 选择性重新生成 — 使用 LLM 翻译反馈 + while 循环支持 checkpoint 重回
         while True:
             all_panel_images = []
             # 从 state 读取上一轮图像与用户引导（首次进入为空）
@@ -560,22 +558,71 @@ class ComicWorkflow:
                 pid = pi.get("panel_id", "")
                 if pid:
                     prev_image_map[pid] = pi
-            # 解析用户反馈中提及的面板 ID（如 page_001_p01）
-            target_panel_ids: set[str] = set()
-            if image_guidance:
-                target_panel_ids = set(_re.findall(r'page_\d+_p\d+', image_guidance))
             has_prev = bool(prev_image_map)
+
+            # v0.6: LLM 解释反馈 → 决定哪些 panel 重生成 + 如何修订 prompt
+            target_panel_ids: set[str] = set()
+            revised_prompts: dict[str, dict] = {}
+            if image_guidance and has_prev:
+                # 构建丰富的 panel 摘要，帮助 LLM 理解 prompt 结构和角色信息
+                panels_info = []
+                for page in pages:
+                    for panel in page.panels:
+                        pid = panel.panel_id
+                        prev = prev_image_map.get(pid)
+                        if not prev:
+                            continue
+                        # 收集角色名称和 core_tags
+                        char_details = []
+                        for cid in panel.characters_in_panel:
+                            if character_db and cid in character_db.characters:
+                                cp = character_db.characters[cid]
+                                char_details.append({
+                                    "id": cid,
+                                    "name": cp.name,
+                                    "core_tags": cp.core_tags[:200] if cp.core_tags else "",
+                                })
+                        # 提取 prompt_pack 中的不可变标签
+                        pp = panel.prompt_pack
+                        panels_info.append({
+                            "panel_id": pid,
+                            "shot_size": panel.shot_size.value,
+                            "camera_angle": panel.camera_angle.value,
+                            "setting": panel.setting,
+                            "mood": panel.mood,
+                            "characters": char_details,
+                            "prompt_used": prev.get("prompt_used", ""),
+                            "negative_used": prev.get("negative_prompt_used", ""),
+                            "quality_tags": pp.quality_tags,
+                            "style_tags": pp.style_tags,
+                            "composition_tags": pp.composition_tags,
+                        })
+                try:
+                    fb_result = await self.image_agent.interpret_feedback(
+                        image_guidance, panels_info,
+                    )
+                    target_panel_ids = set(fb_result.get("target_panel_ids", []))
+                    revised_prompts = fb_result.get("revised_prompts", {})
+                    if target_panel_ids:
+                        writer(log_workflow_event(
+                            "LLM 反馈解释",
+                            f"目标面板: {', '.join(sorted(target_panel_ids))}"
+                        ))
+                except Exception:
+                    # LLM 调用失败 → 全部重新生成
+                    pass
 
             panel_idx = 0
             for page in pages:
                 for panel in page.panels:
                     panel_idx += 1
-                    # v0.5: 选择性跳过 — 已有图像且非目标面板则复用
+                    # 选择性跳过 — 已有图像且非目标面板则复用
                     if has_prev and panel.panel_id in prev_image_map and panel.panel_id not in target_panel_ids:
                         all_panel_images.append(prev_image_map[panel.panel_id])
                         writer(log_workflow_event("跳过面板", f"{panel.panel_id} — 复用已有图像"))
                         continue
                     ref_windows = self._build_ref_windows(panel, character_db)
+                    rp = revised_prompts.get(panel.panel_id, {})
                     inputs = ImageInput(
                         panel_plan=panel,
                         reference_windows=ref_windows,
@@ -585,6 +632,8 @@ class ComicWorkflow:
                         height=image_sizes.get(panel.panel_id, (1024, 1024))[1],
                         user_guidance=image_guidance,
                         previous_output=prev_image_map.get(panel.panel_id),
+                        revised_positive=rp.get("positive", ""),
+                        revised_negative=rp.get("negative", ""),
                     )
                     try:
                         async for evt in self.image_agent.astream(inputs, ctx):

@@ -10,10 +10,13 @@ import random
 import time
 from collections.abc import AsyncIterator
 
+import json
+
 from comicweaver.api import (
     ApiBackendError,
     ComfyUIImageClient,
     ImageGenerationRequest,
+    OpenAICompatibleLLMClient,
 )
 from comicweaver.core import (
     AgentContext,
@@ -91,25 +94,15 @@ class ImageAgent(BaseAgent[ImageInput, ImageOutput]):
                 "Image API is not available — cannot generate panel image"
             )
 
-        # v0.5: 用户反馈驱动 — 根据反馈增强 negative prompt
-        neg = negative
-        if inputs.user_guidance:
-            guidance_lower = inputs.user_guidance.lower()
-            extra_neg = []
-            if any(kw in guidance_lower for kw in ("broken", "artifact", "distorted", "deformed", "mutation")):
-                extra_neg.append("bad anatomy, bad hands, bad face, distorted, mutation, deformed")
-            if any(kw in guidance_lower for kw in ("blur", "blurry", "noise", "grain")):
-                extra_neg.append("blurry, noise, grain, low quality")
-            if any(kw in guidance_lower for kw in ("face", "eyes", "expression")):
-                extra_neg.append("bad face, bad eyes, asymmetrical eyes, poorly drawn face")
-            if extra_neg:
-                neg = neg + ", " + ", ".join(extra_neg)
+        # v0.6: 使用 LLM 翻译后的修订 prompt，或原始 prompt
+        positive = inputs.revised_positive or positive
+        negative = inputs.revised_negative or negative
 
         request = ImageGenerationRequest(
             project_id=context.project_id,
             kind="panel",
             prompt=positive,
-            negative_prompt=neg,
+            negative_prompt=negative,
             width=inputs.width,
             height=inputs.height,
             seed=seed,
@@ -226,6 +219,93 @@ class ImageAgent(BaseAgent[ImageInput, ImageOutput]):
                 self_check_notes=["Placeholder — no image backend available"],
             ),
         )
+
+    async def interpret_feedback(
+        self,
+        user_guidance: str,
+        all_panels_info: list[dict],
+    ) -> dict:
+        """用 LLM 解释用户反馈，返回需重生成的 panel 和修订后的 prompt。
+
+        一次 LLM 调用同时决定：
+        1. 哪些 panel 需要重新生成（target_panel_ids）
+        2. 每个 panel 的 positive/negative prompt 如何修改（revised_prompts）
+        """
+        system_prompt = """You are a prompt engineer for Animagine-XL-4.0 generating BLACK-AND-WHITE MANGA panels.
+
+=== PROJECT CONTEXT (CRITICAL — READ FIRST) ===
+This is a monochrome manga comic project. All images are:
+- Black and white ONLY (no color at all)
+- Manga art style with screentone shading
+- Clean ink lineart with high contrast
+- NEVER add color tags, "blue sky", "red dress", "golden light", etc. — this is a BLACK AND WHITE comic
+
+=== PROMPT STRUCTURE (CRITICAL) ===
+Each panel's positive prompt is assembled from these parts IN ORDER:
+1. QUALITY PREFIX: "masterpiece, high score, great score, absurdres, safe"
+2. SCENE DESCRIPTION: environment, atmosphere, lighting, weather, props, architecture tags
+3. CHARACTER TAGS: appearance tags from the character designer (hair, eyes, body, clothing)
+4. SHOT TAG: composition tag like "panoramic view", "long shot", "full shot", "medium shot", "close-up", "extreme close-up"
+5. ANGLE TAG: "from above", "from below", "dutch angle" (or empty)
+6. STYLE SUFFIX: "monochrome, greyscale, black and white manga style, screentone, ink drawing, clean lineart, high contrast"
+
+=== WHAT YOU CAN MODIFY ===
+- SCENE DESCRIPTION (part 2): Adjust environment, atmosphere, lighting, weather, props. This is YOUR MAIN TOOL. Most feedback is about scene-level issues.
+  Example: user says "太暗了" → add "bright daylight, high key lighting" or change atmosphere tags
+  Example: user says "背景太空" → add more environment/prop tags
+- SHOT TAG (part 4): Can change if user wants different framing
+- ANGLE TAG (part 5): Can change if user wants different camera angle
+- NEGATIVE PROMPT: Add tags to suppress problems. Keep existing negative as base, append new ones.
+
+=== WHAT YOU MUST NEVER MODIFY ===
+- QUALITY PREFIX (part 1): NEVER touch these tags
+- STYLE SUFFIX (part 6): NEVER touch these tags — they ensure B&W manga style
+- CHARACTER TAGS (part 3): These come from the dedicated CharacterAgent and are carefully designed for character consistency. You MUST preserve them EXACTLY as-is.
+  * EXCEPTION: If the character is NOT visible in the shot (extreme close-up of an object, pure environment panel), you MAY remove clothing tags that wouldn't be visible, but NEVER modify existing character tags.
+  * NEVER change hair color, eye color, body type, clothing descriptions
+  * NEVER add new character appearance tags (the character designer handles that)
+
+=== OUTPUT ===
+{
+  "target_panel_ids": ["page_001_p03"],
+  "revised_prompts": {
+    "page_001_p03": {
+      "positive": "complete revised positive prompt (all 6 parts assembled)",
+      "negative": "revised negative prompt"
+    }
+  }
+}
+
+If feedback is NOT about image quality (story/script/character design issues), return:
+{"target_panel_ids": [], "revised_prompts": {}}
+
+Output ONLY valid JSON, no markdown, no extra text."""
+
+        panels_json = json.dumps(all_panels_info, ensure_ascii=False, indent=2)
+        user_message = (
+            f"=== USER FEEDBACK ===\n"
+            f'"{user_guidance}"\n\n'
+            f"=== ALL PANELS (with prompt breakdown) ===\n"
+            f"{panels_json}\n\n"
+            f"Identify which panels to regenerate and revise their prompts. "
+            f"Remember: character tags are sacred, scene/environment tags are your tool. "
+            f"This is a BLACK AND WHITE manga — no color tags."
+        )
+
+        client = OpenAICompatibleLLMClient(self.config.llm)
+        try:
+            data = await asyncio.to_thread(
+                client.complete_json,
+                system_prompt,
+                {"user_message": user_message},
+            )
+        except ApiBackendError:
+            # LLM 不可用时回退：全部重新生成，不修改 prompt
+            return {"target_panel_ids": [], "revised_prompts": {}}
+
+        if not isinstance(data, dict):
+            return {"target_panel_ids": [], "revised_prompts": {}}
+        return data
 
     async def astream(
         self, inputs: ImageInput, context: AgentContext

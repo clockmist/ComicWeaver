@@ -485,6 +485,9 @@ class ImageInput(BaseModel):
     previous_output: dict | None = None
     # 选择性重新生成：指定需要重新生成的 panel_ids，为空则全部重新生成
     target_panel_ids: list[str] = Field(default_factory=list)
+    # LLM 反馈翻译：per-panel 修订后的 prompt（正/负面）
+    revised_positive: str = ""
+    revised_negative: str = ""
 
 
 class ImageOutput(BaseModel):
