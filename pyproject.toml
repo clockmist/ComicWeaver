@@ -44,7 +44,7 @@ dev = [
 ]
 
 [project.scripts]
-comicweaver = "comicweaver.ui.app:main"
+comicweaver = "comicweaver.ui.app_new:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

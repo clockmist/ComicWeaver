@@ -598,6 +598,28 @@ class ComicWorkflow:
         state["panel_images"] = all_panel_images
         elapsed = (time.perf_counter() - t0) * 1000
         writer(log_performance("image_agent", elapsed, status=f"{len(all_panel_images)}/{total_panels} panels"))
+
+        # --- Checkpoint & auto-save (介于图像生成与台词气泡之间) ---
+        self._save_checkpoint(state)
+        if should_pause(state, "after_image"):
+            writer(CheckpointSignal(
+                checkpoint_id="after_image",
+                label=KEY_CHECKPOINTS["after_image"],
+                payload={
+                    "phase": state.get("current_phase", "?"),
+                    "project_id": state.get("project_id", "?"),
+                    "panel_count": len(all_panel_images),
+                },
+            ))
+            await self._await_response()
+            if self._last_decision == "regenerate":
+                state["panel_images"] = []
+                state["bubble_placements"] = {}
+                if self._last_guidance:
+                    writer(log_workflow_event("用户指导", self._last_guidance[:200]))
+                writer(WorkflowMessage(WorkflowEvent.NODE_END, "image_agent"))
+                return state
+
         writer(WorkflowMessage(WorkflowEvent.NODE_END, "image_agent"))
         return state
 
