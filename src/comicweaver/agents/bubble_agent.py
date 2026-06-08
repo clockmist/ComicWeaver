@@ -214,7 +214,7 @@ class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
         yolo_cfg = getattr(self.config, "yolo", None)
         model_path = yolo_cfg.model_path if yolo_cfg else "yolo/face_yolov8n.pt"
         # 漫画/动漫人脸较难检测，默认使用较低置信度阈值
-        confidence = yolo_cfg.confidence_threshold if yolo_cfg else 0.15
+        confidence = yolo_cfg.confidence_threshold if yolo_cfg else 0.3
         logger.info(
             "开始 YOLO 人脸检测: %d 个面板 (model=%s, confidence=%.2f, 顺序处理)",
             len(tasks), model_path, confidence,

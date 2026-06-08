@@ -54,7 +54,7 @@ def _get_model(model_path: str):
 async def detect_faces_yolo(
     image_path: str,
     model_path: str = "yolo/face_yolov8n.pt",
-    confidence_threshold: float = 0.15,
+    confidence_threshold: float = 0.3,
 ) -> list[FaceRegion]:
     """使用 YOLO 检测人脸，返回归一化 FaceRegion 列表。
 
