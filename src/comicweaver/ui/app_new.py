@@ -223,7 +223,7 @@ def build_ui() -> gr.Blocks:
                         dev_filter_category = gr.Dropdown(
                             label="类别", value="all", scale=1,
                             choices=[("全部","all"),("输入","agent_input"),("输出","agent_output"),
-                                     ("状态","state_change"),("审查","review_decision"),
+                                     ("状态","state_change"),
                                      ("错误","error"),("性能","performance"),("工作流","workflow")],
                         )
                         dev_filter_level = gr.Dropdown(
@@ -289,15 +289,14 @@ def build_ui() -> gr.Blocks:
                         curve_html = gr.HTML(scale=1)
                     storyboard_html = gr.HTML()
                     comparison_html = gr.HTML()
-                with gr.Accordion("👤 角色 & 审查", open=False):
+                with gr.Accordion("👤 角色", open=False):
                     character_profiles_html = gr.HTML()
-                    review_html = gr.HTML()
 
                 load_results_btn.click(
                     load_all_results,
                     inputs=[page_state, bubble_toggle_state],
                     outputs=[script_html, curve_html, storyboard_html,
-                              review_html, page_reader_html, comparison_html,
+                              page_reader_html, comparison_html,
                               character_profiles_html],
                 )
                 prev_btn.click(

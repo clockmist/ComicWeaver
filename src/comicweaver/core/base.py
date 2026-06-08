@@ -1,6 +1,6 @@
-"""Agent 基类 - 对应 docs/agents/00-base.md §2。
+"""Agent 基类。
 
-所有生产Agent与审查Agent都必须继承 BaseAgent。
+所有生产 Agent 都必须继承 BaseAgent。
 """
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from comicweaver.config import AppConfig, load_config
 
 from .schema import (
     AgentContext,
-    ReviewFeedback,
     StreamCallback,
     StreamEvent,
     StreamEventType,
@@ -29,11 +28,10 @@ TOut = TypeVar("TOut", bound=BaseModel)
 class BaseAgent(ABC, Generic[TIn, TOut]):
     """所有Agent的基类。
 
-    子类必须设置 name / version / rubric_id 类属性,并实现 run() 与 astream()。
+    子类必须设置 name / version 类属性,并实现 run() 与 astream()。
     """
     name: str = "base_agent"
     version: str = "0.0.0"
-    rubric_id: str = "rubric_unknown"
 
     def __init__(
         self,
@@ -69,21 +67,10 @@ class BaseAgent(ABC, Generic[TIn, TOut]):
 
     # ---------- 通用工具 ----------
 
-    async def revise(
-        self,
-        inputs: TIn,
-        previous_output: TOut,
-        review_feedback: ReviewFeedback,
-        context: AgentContext,
-    ) -> TOut:
-        """携带审查反馈的返工。默认实现:把feedback注入inputs.feedback并重新run。"""
-        revised_inputs = inputs.model_copy(update={"feedback": review_feedback})
-        return await self.run(revised_inputs, context)
-
     def _inputs_hash(self, inputs: TIn) -> str:
         """计算输入哈希,用于缓存。"""
         try:
-            payload = inputs.model_dump_json(exclude={"feedback"})
+            payload = inputs.model_dump_json()
         except Exception:  # noqa: BLE001
             payload = str(inputs)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]

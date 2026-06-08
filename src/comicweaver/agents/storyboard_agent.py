@@ -191,7 +191,14 @@ Example 5 — CHARACTER CLOSE-UP (emotional climax, rare):
 Input: character_id="char_001", character_action="peering through rifle scope, finger on trigger, sweat dripping", narrative_purpose="极近距离：瞄准镜后的眼睛，汗水沿眉骨滑落，准星中对准远处目标", emotion="tension", emotion_intensity=0.9, location="废墟楼顶边缘", time_of_day="evening", character_tags="1girl,solo,young_adult,long hair,straight hair,black hair,large eyes,green eyes,tactical vest,fitted shirt,cargo pants,slim"
 Output: {"filtered_char_tags":"1girl,solo,long hair,straight hair,black hair,large eyes,green eyes","scene_description":"scope lens reflection,crosshair overlay,rooftop edge visible,sweat on brow,focused eyes,tense finger","shot_size":"extreme_close","camera_angle":"eye_level"}
 
-Output ONLY valid JSON. No markdown, no extra text."""
+Output ONLY valid JSON. No markdown, no extra text.
+
+=== REVISION MODE ===
+If the user message contains a "REVISION REQUEST" section, you are in revision mode. In this case:
+- You will see both the previous design output and the user's feedback.
+- Revise the shot composition, tag filtering, and scene_description according to the user's specific requests.
+- ONLY change what the user asked to change — preserve the shot_size, camera_angle, and other design choices from the previous version unless the user specifically requests a change.
+- If the user feedback mentions a specific panel by panel_id, only revise that panel."""
 
 
 # ============================================================================
@@ -314,7 +321,6 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
 
     name = "storyboard_agent"
     version = "0.7.0-llm"
-    rubric_id = "rubric_storyboard_v1"
 
     async def run(
         self, inputs: StoryboardInput, context: AgentContext
@@ -376,6 +382,8 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
                     prev_narrative=prev_narrative,
                     global_idx=global_idx,
                     total_panels=total,
+                    user_guidance=inputs.user_guidance,
+                    previous_output=inputs.previous_output,
                 )
                 panel_designs.append(design)
                 prev_narrative = pt.get("narrative_purpose", "")
@@ -418,6 +426,8 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
                     prev_narrative=prev_narrative,
                     global_idx=idx,
                     total_panels=total,
+                    user_guidance=inputs.user_guidance,
+                    previous_output=inputs.previous_output,
                 )
                 panel_designs.append(design)
                 prev_narrative = legacy_pt.get("narrative_purpose", "")
@@ -789,6 +799,8 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
         prev_narrative: str = "",
         global_idx: int = 0,
         total_panels: int = 1,
+        user_guidance: str = "",
+        previous_output: dict | None = None,
     ) -> dict:
         """v0.7: LLM receives full char_tags + narrative description, returns
         filtered_char_tags + scene_description + shot_size + camera_angle.
@@ -812,6 +824,17 @@ class StoryboardAgent(BaseAgent[StoryboardInput, StoryboardOutput]):
     "character_tags": full_char_tags if char_name else "",  # 无角色时传空
     "panel_index": f"{global_idx + 1}/{total_panels}",
 }
+
+        # v0.5: 用户反馈驱动修订
+        if user_guidance and global_idx == 0:
+            prev_preview = ""
+            if previous_output:
+                prev_pages = previous_output.get("pages", []) if isinstance(previous_output, dict) else previous_output
+                prev_preview = json.dumps(prev_pages, ensure_ascii=False, indent=2)[:1200] if isinstance(prev_pages, list) else ""
+            user_payload["revision_request"] = {
+                "guidance": user_guidance,
+                "previous_output": prev_preview,
+            }
 
         data = await asyncio.to_thread(
             client.complete_json,

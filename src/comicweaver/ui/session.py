@@ -17,7 +17,6 @@ class Session:
         self.event_log: list[dict] = []
         self.done_agents: list[str] = []
         self.active_agent: str = ""
-        self.review_scores: dict[str, float] = {}
         self.last_checkpoint: dict | None = None
         self.workflow_done: bool = False
         self.error: str | None = None
@@ -34,7 +33,6 @@ class Session:
         self.event_log = []
         self.done_agents = []
         self.active_agent = ""
-        self.review_scores = {}
         self.last_checkpoint = None
         self.workflow_done = False
         self.error = None

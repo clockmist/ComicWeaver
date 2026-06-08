@@ -46,7 +46,6 @@ class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
 
     name = "bubble_agent"
     version = "0.3.0"
-    rubric_id = "rubric_bubble_v1"
 
     async def run(
         self, inputs: BubbleInput, context: AgentContext
@@ -180,7 +179,7 @@ class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
                     f"YOLO 检测到 {total_faces} 张人脸 (分布在 {len(faces_by_panel)} 个面板)",
                     f"页尺寸: {inputs.page_width_px}x{inputs.page_height_px}",
                     f"已生成 {len(bubbled_images)} 张气泡预览图",
-                ],
+                ] + ([f"user_guidance: {inputs.user_guidance[:100]}"] if inputs.user_guidance else []),
             ),
         )
 

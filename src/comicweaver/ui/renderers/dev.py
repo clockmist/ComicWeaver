@@ -71,7 +71,6 @@ def render_dev_log(dev_entries: list[dict], filter_category: str = "all",
         "image_agent": "图像生成",
         "bubble_agent": "台词气泡",
         "layout_agent": "排版合成",
-        "reviewer_agent": "审查",
         "workflow": "工作流",
     }
 

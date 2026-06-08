@@ -33,7 +33,6 @@ class ImageAgent(BaseAgent[ImageInput, ImageOutput]):
 
     name = "image_agent"
     version = "0.6.0"
-    rubric_id = "rubric_image_v1"
 
     async def run(self, inputs: ImageInput, context: AgentContext) -> ImageOutput:
         await self._sleep_for_demo(0.4)
@@ -92,11 +91,25 @@ class ImageAgent(BaseAgent[ImageInput, ImageOutput]):
                 "Image API is not available — cannot generate panel image"
             )
 
+        # v0.5: 用户反馈驱动 — 根据反馈增强 negative prompt
+        neg = negative
+        if inputs.user_guidance:
+            guidance_lower = inputs.user_guidance.lower()
+            extra_neg = []
+            if any(kw in guidance_lower for kw in ("broken", "artifact", "distorted", "deformed", "mutation")):
+                extra_neg.append("bad anatomy, bad hands, bad face, distorted, mutation, deformed")
+            if any(kw in guidance_lower for kw in ("blur", "blurry", "noise", "grain")):
+                extra_neg.append("blurry, noise, grain, low quality")
+            if any(kw in guidance_lower for kw in ("face", "eyes", "expression")):
+                extra_neg.append("bad face, bad eyes, asymmetrical eyes, poorly drawn face")
+            if extra_neg:
+                neg = neg + ", " + ", ".join(extra_neg)
+
         request = ImageGenerationRequest(
             project_id=context.project_id,
             kind="panel",
             prompt=positive,
-            negative_prompt=negative,
+            negative_prompt=neg,
             width=inputs.width,
             height=inputs.height,
             seed=seed,
@@ -105,6 +118,7 @@ class ImageAgent(BaseAgent[ImageInput, ImageOutput]):
                 "panel_id": plan.panel_id,
                 "page_id": plan.page_id,
                 "char_id": char_id,
+                "user_guidance": inputs.user_guidance[:200] if inputs.user_guidance else "",
             },
         )
         response = await asyncio.to_thread(
@@ -166,7 +180,7 @@ class ImageAgent(BaseAgent[ImageInput, ImageOutput]):
                     f"shot={plan.shot_size.value} angle={plan.camera_angle.value} "
                     f"mood={plan.mood} weather={plan.weather} "
                     f"prompt_len={len(positive)}"
-                ],
+                ] + ([f"user_guidance: {inputs.user_guidance[:100]}"] if inputs.user_guidance else []),
             ),
         )
 

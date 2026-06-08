@@ -34,7 +34,6 @@ class CharacterAgent(BaseAgent[CharacterInput, CharacterOutput]):
 
     name = "character_agent"
     version = "0.4.0-llm"
-    rubric_id = "rubric_character_v1"
 
     async def run(self, inputs: CharacterInput, context: AgentContext) -> CharacterOutput:
         if inputs.operation == "init":
@@ -53,7 +52,7 @@ class CharacterAgent(BaseAgent[CharacterInput, CharacterOutput]):
 
         # 批量调用 LLM 生成所有角色的 Tag / 性别 / 外观描述（一次 API 调用）
         try:
-            llm_data_map = await self._generate_core_tags_batch(drafts)
+            llm_data_map = await self._generate_core_tags_batch(drafts, inputs.user_guidance, inputs.previous_output)
         except ApiBackendError:
             if self.config.runtime.fallback_to_local:
                 llm_data_map = self._generate_core_tags_local(drafts)
@@ -188,7 +187,9 @@ class CharacterAgent(BaseAgent[CharacterInput, CharacterOutput]):
         )
 
     async def _generate_core_tags_batch(
-        self, drafts: list[CharacterDraft]
+        self, drafts: list[CharacterDraft],
+        user_guidance: str = "",
+        previous_output: dict | None = None,
     ) -> dict[str, dict]:
         """调用 LLM 批量生成角色的 Danbooru Tag、性别标签和外观描述。
 
@@ -222,7 +223,14 @@ CRITICAL RULES:
 6. NEVER include style tags (anime, realistic, masterpiece, quality, detailed, beautiful, etc.)
 7. NEVER include background tags (simple background, white background, etc.)
 8. Always include "solo" in core_tags (this is for single-character reference images).
-9. Output valid JSON: {"characters": [{"char_id": "...", "core_tags": "1girl, solo, ...", "gender_tag": "1girl", "appearance_prompt": "...", "visual_traits": {"hair": "...", "eyes": "...", "body": "...", "clothing": "...", "distinctive": [...]}}]}"""
+9. Output valid JSON: {"characters": [{"char_id": "...", "core_tags": "1girl, solo, ...", "gender_tag": "1girl", "appearance_prompt": "...", "visual_traits": {"hair": "...", "eyes": "...", "body": "...", "clothing": "...", "distinctive": [...]}}]}
+
+=== REVISION MODE ===
+If the input JSON contains a "revision_request" key, you are in revision mode. Read the character data from the "user_message" key (a JSON string describing characters to convert). The revision_request contains:
+- "guidance": the user's feedback about what to change
+- "previous_output": the previous character design that needs revision
+Revise the character tags and visual_traits according to the user's specific requests.
+ONLY change what the user asked to change — preserve all other tag categories from the previous version. If the user mentions a specific character by name or char_id, only modify that character."""
 
         char_list = [
             {
@@ -236,11 +244,23 @@ CRITICAL RULES:
 
         user_prompt = f"Characters to convert:\n{json.dumps(char_list, ensure_ascii=False, indent=2)}"
 
+        # v0.5: 用户反馈驱动修订
+        payload: dict = {"user_message": user_prompt}
+        if user_guidance:
+            prev_preview = ""
+            if previous_output:
+                prev_chars = previous_output.get("characters", {}) if isinstance(previous_output, dict) else {}
+                prev_preview = json.dumps(prev_chars, ensure_ascii=False, indent=2)[:1000]
+            payload["revision_request"] = {
+                "guidance": user_guidance,
+                "previous_output": prev_preview,
+            }
+
         client = OpenAICompatibleLLMClient(self.config.llm)
         data = await asyncio.to_thread(
             client.complete_json,
             system_prompt,
-            {"characters": char_list},
+            payload,
         )
 
         draft_appearances = {d.char_id: d.appearance for d in drafts}

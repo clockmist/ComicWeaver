@@ -74,7 +74,6 @@ class LayoutAgent(BaseAgent[LayoutInput, LayoutOutput]):
 
     name = "layout_agent"
     version = "0.3.0-layout"
-    rubric_id = "rubric_layout_v1"
 
     # ------------------------------------------------------------------
     # Core logic
@@ -204,7 +203,7 @@ class LayoutAgent(BaseAgent[LayoutInput, LayoutOutput]):
                 self_check_notes=[
                     f"已合成{len(final_pages)}页, {total_bubbles}个气泡",
                     f"页尺寸: {inputs.page_width_px}×{inputs.page_height_px}",
-                ],
+                ] + ([f"user_guidance: {inputs.user_guidance[:100]}"] if inputs.user_guidance else []),
             ),
         )
 

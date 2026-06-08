@@ -3,7 +3,6 @@ from .bubble_agent import BubbleAgent
 from .character_agent import CharacterAgent
 from .image_agent import ImageAgent
 from .layout_agent import LayoutAgent
-from .reviewer_agent import ReviewerAgent
 from .script_agent import ScriptAgent
 from .story_agent import StoryAgent
 from .storyboard_agent import StoryboardAgent
@@ -13,7 +12,6 @@ __all__ = [
     "CharacterAgent",
     "ImageAgent",
     "LayoutAgent",
-    "ReviewerAgent",
     "ScriptAgent",
     "StoryAgent",
     "StoryboardAgent",
@@ -29,5 +27,4 @@ AGENT_REGISTRY: dict[str, type] = {
     "image_agent": ImageAgent,
     "bubble_agent": BubbleAgent,
     "layout_agent": LayoutAgent,
-    "reviewer_agent": ReviewerAgent,
 }

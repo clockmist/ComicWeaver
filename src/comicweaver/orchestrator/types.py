@@ -21,9 +21,6 @@ from comicweaver.core import (
 class WorkflowEvent(str, Enum):
     NODE_START = "node_start"
     NODE_END = "node_end"
-    REVIEW_PASS = "review_pass"
-    REVIEW_REVISE = "review_revise"
-    REVIEW_ESCALATE = "review_escalate"
     CHECKPOINT = "checkpoint"
     WORKFLOW_DONE = "workflow_done"
     ERROR = "error"

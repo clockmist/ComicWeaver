@@ -7,24 +7,22 @@ from ..renderers.characters import render_character_profiles
 from ..renderers.dev import render_dev_log, render_performance_summary
 from ..renderers.images import render_panel_images_gallery
 from ..renderers.layout import render_comparison_view, render_page_reader
-from ..renderers.review import render_review_full_detail, render_review_history
 from ..renderers.story import render_emotion_curve, render_script_summary
 from ..renderers.storyboard import render_storyboard_detail, render_storyboard_preview
 from ..renderers.agents import render_agent_outputs
 from ..session import SESSION
 
 
-def load_results(page_idx: int = 0, show_bubbles: bool = False) -> tuple[str, str, str, str, str, str, list]:
+def load_results(page_idx: int = 0, show_bubbles: bool = False) -> tuple[str, str, str, str, str, list]:
     if SESSION.state is None:
         empty = '<div style="color:#64748b;padding:12px;">请先创建项目并运行工作流</div>'
-        return empty, empty, empty, empty, empty, empty, []
+        return empty, empty, empty, empty, empty, []
 
     state = SESSION.state
     script = state.get("structured_script", {}) or {}
     story = state.get("developed_story", {}) or {}
     curve = state.get("emotion_curve", []) or []
     plan = state.get("storyboard_plan", []) or []
-    reviews = state.get("review_results", []) or []
     final_pages = state.get("final_pages", []) or []
 
     page_reader_html = render_page_reader(final_pages, page_idx, show_bubbles)
@@ -40,7 +38,6 @@ def load_results(page_idx: int = 0, show_bubbles: bool = False) -> tuple[str, st
         render_script_summary(script, story),
         render_emotion_curve(curve),
         render_storyboard_preview(plan),
-        render_review_history(reviews),
         page_reader_html,
         comparison_html,
         page_gallery,
@@ -51,14 +48,13 @@ def load_all_results(page_idx: int = 0, show_bubbles: bool = False) -> tuple:
     """Tab 3 预览：加载所有结果数据。"""
     if SESSION.state is None:
         empty = '<div style="color:#64748b;padding:12px;">请先创建项目并运行工作流</div>'
-        return (empty, empty, empty, empty, empty, empty, empty)
+        return (empty, empty, empty, empty, empty, empty)
 
     state = SESSION.state
     script = state.get("structured_script", {}) or {}
     story = state.get("developed_story", {}) or {}
     curve = state.get("emotion_curve", []) or []
     plan = state.get("storyboard_plan", []) or []
-    reviews = state.get("review_results", []) or []
     final_pages = state.get("final_pages", []) or []
     character_db = state.get("character_db", {}) or {}
 
@@ -66,7 +62,6 @@ def load_all_results(page_idx: int = 0, show_bubbles: bool = False) -> tuple:
         render_script_summary(script, story),
         render_emotion_curve(curve),
         render_storyboard_preview(plan),
-        render_review_history(reviews),
         render_page_reader(final_pages, page_idx, show_bubbles),
         render_comparison_view(plan, final_pages),
         render_character_profiles(character_db, SESSION.agent_outputs),
@@ -97,22 +92,20 @@ def get_download_files() -> list[str]:
     return paths
 
 
-def load_agent_outputs_tab() -> tuple[str, str, str, str]:
-    """加载 Agent 输出 Tab 的所有内容（面板图像已合并到图像生成详情中，不再单独展示）。"""
+def load_agent_outputs_tab() -> tuple[str, str, str]:
+    """加载 Agent 输出 Tab 的所有内容。"""
     if SESSION.state is None:
         empty = '<div style="color:#64748b;padding:12px;">请先创建项目并运行工作流</div>'
-        return empty, empty, empty, empty
+        return empty, empty, empty
 
     agent_outputs = SESSION.agent_outputs
     character_db = SESSION.state.get("character_db") or {}
     plan = SESSION.state.get("storyboard_plan", []) or []
-    reviews = SESSION.state.get("review_results", []) or []
 
     return (
         render_agent_outputs(agent_outputs),
         render_character_profiles(character_db, agent_outputs),
         render_storyboard_detail(plan),
-        render_review_full_detail(reviews),
     )
 
 

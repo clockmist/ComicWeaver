@@ -21,7 +21,6 @@ def render_agent_outputs(agent_outputs: dict[str, dict]) -> str:
         ("storyboard_agent", "🎬 分镜 Agent", "分镜设计"),
         ("image_agent", "🎨 图像 Agent", "面板图像生成"),
         ("layout_agent", "📐 排版 Agent", "页面排版合成"),
-        ("reviewer_agent", "✅ 审查 Agent", "质量审查"),
     ]
 
     cards = []

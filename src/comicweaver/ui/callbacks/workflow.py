@@ -111,7 +111,6 @@ def _validate_and_reset_state(state: ComicState, start_phase: str) -> str | None
             else:
                 state[field] = {}  # type: ignore[literal-required]
 
-    state["review_results"] = []
     state["retry_counts"] = {}
     state["pending_checkpoint"] = None
     state["user_decisions"] = []
@@ -176,21 +175,6 @@ async def _consume_workflow(session: Session) -> None:
                         "agent": msg.node,
                         "type": "done",
                         "content": f"{msg.node} 完成",
-                        "timestamp": msg.timestamp,
-                    })
-                elif msg.event in (
-                    WorkflowEvent.REVIEW_PASS,
-                    WorkflowEvent.REVIEW_REVISE,
-                    WorkflowEvent.REVIEW_ESCALATE,
-                ):
-                    payload = msg.payload or {}
-                    score = payload.get("score", 0)
-                    if "dimension_scores" in payload:
-                        session.review_scores = payload["dimension_scores"]
-                    session.event_log.append({
-                        "agent": "reviewer",
-                        "type": "log",
-                        "content": f"{msg.event.value.upper()} · 评分 {score:.1f}",
                         "timestamp": msg.timestamp,
                     })
                 elif msg.event == WorkflowEvent.WORKFLOW_DONE:

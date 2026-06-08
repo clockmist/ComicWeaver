@@ -37,12 +37,6 @@ class StreamEventType(str, Enum):
     DONE = "done"
 
 
-class ReviewDecision(str, Enum):
-    PASS = "pass"
-    REVISE = "revise"
-    ESCALATE = "escalate"
-
-
 class ShotSize(str, Enum):
     EXTREME_LONG = "extreme_long"
     LONG = "long"
@@ -97,21 +91,6 @@ class BoundingBox(BaseModel):
 
     def center(self) -> tuple[float, float]:
         return (self.x + self.width / 2, self.y + self.height / 2)
-
-
-# ===========================================================================
-# 审查反馈
-# ===========================================================================
-
-class ReviewFeedback(BaseModel):
-    decision: ReviewDecision
-    overall_score: float = 0.0
-    dimension_scores: dict[str, float] = Field(default_factory=dict)
-    issues: list[str] = Field(default_factory=list)
-    suggestions: list[str] = Field(default_factory=list)
-    revise_prompt: str = ""
-    rubric_id: str = ""
-    reviewer_version: str = "0.1.0"
 
 
 # ===========================================================================
@@ -237,7 +216,8 @@ class StoryInput(BaseModel):
     genre_hint: str | None = None
     style_hint: str | None = None
     language: str = "zh"
-    feedback: ReviewFeedback | None = None
+    user_guidance: str = ""
+    previous_output: dict | None = None
 
 
 class ScriptInput(BaseModel):
@@ -250,7 +230,8 @@ class ScriptInput(BaseModel):
     target_panels_per_page: int = 4
     style_hint: str | None = None
     language: str = "zh"
-    feedback: ReviewFeedback | None = None
+    user_guidance: str = ""
+    previous_output: dict | None = None
 
 
 class ScriptOutput(BaseModel):
@@ -346,7 +327,8 @@ class CharacterInput(BaseModel):
     style_preset: str | None = None
     panel_id: str | None = None
     target_characters: list[str] | None = None
-    feedback: ReviewFeedback | None = None
+    user_guidance: str = ""
+    previous_output: dict | None = None
 
 
 class CharacterOutput(BaseModel):
@@ -443,10 +425,11 @@ class StoryboardInput(BaseModel):
     style_preset: str = "manga"
     target_pages: int = 4
     target_panels_per_page: int = 4
-    feedback: ReviewFeedback | None = None
     # v0.4: 故事上下文 — 让 StoryboardAgent 知道叙事阶段
     story_summary: str = ""                                     # 从 StoryOutput.summary
     narrative_structure: NarrativeStructure | None = None       # 当前叙事阶段
+    user_guidance: str = ""
+    previous_output: dict | None = None
 
 
 class StoryboardOutput(BaseModel):
@@ -498,7 +481,10 @@ class ImageInput(BaseModel):
     seed: int | None = None
     width: int = 1024
     height: int = 1024
-    feedback: ReviewFeedback | None = None
+    user_guidance: str = ""
+    previous_output: dict | None = None
+    # 选择性重新生成：指定需要重新生成的 panel_ids，为空则全部重新生成
+    target_panel_ids: list[str] = Field(default_factory=list)
 
 
 class ImageOutput(BaseModel):
@@ -580,7 +566,8 @@ class BubbleInput(BaseModel):
     margin_px: int = 40
     gutter_px: int = 10
     reading_direction: Literal["ltr", "rtl"] = "ltr"
-    feedback: ReviewFeedback | None = None
+    user_guidance: str = ""
+    previous_output: dict | None = None
 
 
 class BubbleOutput(BaseModel):
@@ -601,10 +588,11 @@ class LayoutInput(BaseModel):
     style_preset: str = "manga"
     font_config: FontConfig = Field(default_factory=FontConfig)
     export_formats: list[str] = Field(default_factory=lambda: ["png"])
-    feedback: ReviewFeedback | None = None
     # Page geometry
     page_width_px: int = 1240       # A4 @150dpi
     page_height_px: int = 1754
+    user_guidance: str = ""
+    previous_output: dict | None = None
     margin_px: int = 40
     gutter_px: int = 10
     reading_direction: Literal["ltr", "rtl"] = "ltr"
@@ -623,62 +611,6 @@ class LayoutOutput(BaseModel):
     overall_metrics: LayoutMetrics = Field(default_factory=LayoutMetrics)
     meta: AgentOutputMeta = Field(default_factory=lambda: AgentOutputMeta(
         agent="layout_agent", version="0.1.0"
-    ))
-
-
-# ===========================================================================
-# 审查 Agent 模型
-# ===========================================================================
-
-class SchemaCheckResult(BaseModel):
-    passed: bool = True
-    errors: list[str] = Field(default_factory=list)
-    missing_fields: list[str] = Field(default_factory=list)
-    invalid_fields: list[str] = Field(default_factory=list)
-
-
-class QualityCheckResult(BaseModel):
-    overall_score: float = 0.0
-    dimension_scores: dict[str, float] = Field(default_factory=dict)
-    rubric_id: str = ""
-    strengths: list[str] = Field(default_factory=list)
-    issues: list[str] = Field(default_factory=list)
-    suggestions: list[str] = Field(default_factory=list)
-    confidence: float = 1.0
-
-
-class UserOption(BaseModel):
-    option_id: str
-    label: str
-    description: str = ""
-    requires_input: bool = False
-
-
-class EscalationSummary(BaseModel):
-    headline: str
-    user_options: list[UserOption] = Field(default_factory=list)
-    technical_details: str = ""
-    suggested_action: str = ""
-
-
-class ReviewInput(BaseModel):
-    target_agent: str
-    target_rubric_id: str
-    target_output: dict
-    target_inputs: dict = Field(default_factory=dict)
-    retry_count: int = 0
-    max_retries: int = 3
-    escalate_threshold: float = 4.0
-    pass_threshold: float = 7.0
-
-
-class ReviewOutput(BaseModel):
-    feedback: ReviewFeedback
-    schema_check: SchemaCheckResult = Field(default_factory=SchemaCheckResult)
-    quality_check: QualityCheckResult = Field(default_factory=QualityCheckResult)
-    escalation_summary: EscalationSummary | None = None
-    meta: AgentOutputMeta = Field(default_factory=lambda: AgentOutputMeta(
-        agent="reviewer_agent", version="0.1.0"
     ))
 
 

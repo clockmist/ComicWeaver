@@ -96,7 +96,14 @@ Return a single JSON object matching this EXACT structure:
 4. tone should help downstream artists understand the visual mood without being visual instructions.
 5. Characters should be introduced naturally within the story. The characters list is a quick reference, not the main characterization.
 6. The story must have strong visual potential — moments that would make striking images — but describe them as STORY moments, not camera shots.
-7. Output ONLY the JSON object, no markdown, no extra text."""
+7. Output ONLY the JSON object, no markdown, no extra text.
+
+=== REVISION MODE ===
+If the user message contains a "REVISION REQUEST" section, you are in revision mode. In this case:
+- You will see both your previous story and the user's feedback.
+- Revise the story according to the user's specific requests.
+- ONLY change what the user asked to change — preserve all other elements from the previous version.
+- If the user's feedback is unclear, err on the side of keeping the original."""
 
 
 class StoryAgent(BaseAgent[StoryInput, StoryOutput]):
@@ -104,7 +111,6 @@ class StoryAgent(BaseAgent[StoryInput, StoryOutput]):
 
     name = "story_agent"
     version = "0.2.0"
-    rubric_id = "rubric_script_v1"
 
     async def run(self, inputs: StoryInput, context: AgentContext) -> StoryOutput:
         if not self.config.llm.is_available:
@@ -133,6 +139,23 @@ class StoryAgent(BaseAgent[StoryInput, StoryOutput]):
             f"Create a story with strong emotional impact and memorable characters. "
             f"Focus on WHAT happens in the story, not HOW to draw it."
         )
+
+        # v0.5: 用户反馈驱动修订
+        if inputs.user_guidance:
+            prev_story_text = ""
+            if inputs.previous_output:
+                prev_story_text = inputs.previous_output.get("story_text", "")
+            prev_preview = prev_story_text[:800] if prev_story_text else "(无上一版)"
+            user_message += (
+                f"\n\n=== REVISION REQUEST ===\n"
+                f"Your previous story was:\n---\n{prev_preview}\n---\n\n"
+                f"The user reviewed it and provided this feedback:\n"
+                f'"{inputs.user_guidance}"\n\n'
+                f"Please rewrite the story incorporating the user's feedback. "
+                f"Only change what the user asked you to change; "
+                f"keep all other elements (characters, setting, tone, etc.) "
+                f"from the previous version intact."
+            )
 
         try:
             data = await asyncio.to_thread(

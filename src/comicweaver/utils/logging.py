@@ -44,7 +44,6 @@ _AGENT_CN: dict[str, str] = {
     "image_agent": "图像生成Agent",
     "bubble_agent": "台词气泡Agent",
     "layout_agent": "排版合成Agent",
-    "reviewer_agent": "审查Agent",
     "workflow": "工作流引擎",
 }
 
@@ -583,34 +582,6 @@ def summarize_bubble_output(output: dict) -> dict:
             }
             for pid, info in panel_summary.items()
         },
-    }
-
-
-def summarize_review_output(output: dict) -> dict:
-    """从 ReviewOutput 构建可读摘要。"""
-    fb = output.get("feedback") or {}
-    sc = output.get("schema_check") or {}
-    qc = output.get("quality_check") or {}
-    es = output.get("escalation_summary") or {}
-    return {
-        "decision": fb.get("decision", "?"),
-        "overall_score": fb.get("overall_score", 0),
-        "dimension_scores": fb.get("dimension_scores", qc.get("dimension_scores", {})),
-        "issues": fb.get("issues", qc.get("issues", [])),
-        "suggestions": fb.get("suggestions", qc.get("suggestions", [])),
-        "strengths": qc.get("strengths", []),
-        "confidence": qc.get("confidence", 0),
-        "schema_check": {
-            "passed": sc.get("passed", True),
-            "missing_fields": sc.get("missing_fields", []),
-            "invalid_fields": sc.get("invalid_fields", []),
-            "errors": sc.get("errors", []),
-        },
-        "revise_prompt": fb.get("revise_prompt", ""),
-        "escalation": {
-            "headline": es.get("headline", ""),
-            "suggested_action": es.get("suggested_action", ""),
-        } if es else None,
     }
 
 

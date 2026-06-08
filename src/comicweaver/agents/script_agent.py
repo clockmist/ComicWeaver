@@ -11,6 +11,7 @@ v2.1: chunked — sequential chunks, single LLM call per chunk (Option A)
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -79,7 +80,14 @@ Return JSON:
   ]
 }}
 
-LANGUAGE: {language}. Output ONLY valid JSON object, no markdown, no extra text."""
+LANGUAGE: {language}. Output ONLY valid JSON object, no markdown, no extra text.
+
+=== REVISION MODE ===
+If the user message contains a "REVISION REQUEST" section, you are in revision mode. In this case:
+- You will see both the previous script structure and the user's feedback.
+- Revise the page outlines according to the user's specific requests.
+- ONLY change what the user asked to change — preserve all other elements from the previous version.
+- If the user's feedback is unclear, err on the side of keeping the original."""
 
 
 # ============================================================================
@@ -212,6 +220,13 @@ RULES:
 8. Follow the DIALOGUE & NARRATION RULES above strictly: character present → fill dialogue_text (multi-sentence, natural speech); no character → fill narration (1-2 full sentences). Never fill both in one panel.
 9. LANGUAGE: {language}. Output ONLY valid JSON object, no markdown, no extra text.
 
+=== REVISION MODE ===
+If the user message contains a "REVISION REQUEST" section, you are in revision mode. In this case:
+- You will see both the previous panelization results and the user's feedback.
+- Revise the panels according to the user's specific requests.
+- ONLY change what the user asked to change — preserve all other panels and their structure from the previous version.
+- If the user's feedback is unclear, err on the side of keeping the original.
+
 === SCENE-FIRST WRITING EXAMPLES ===
 
 BAD narrative_purpose (character-centric, no visual information):
@@ -244,7 +259,6 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
 
     name = "script_agent"
     version = "2.1.0"
-    rubric_id = "rubric_script_v2"
 
     def __init__(self, *args, chunk_size: int = DEFAULT_CHUNK_SIZE, **kwargs):
         super().__init__(*args, **kwargs)
@@ -307,6 +321,8 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
                 char_context=char_context,
                 language=lang,
                 chunk_size=self.chunk_size,
+                user_guidance=inputs.user_guidance,
+                previous_output=inputs.previous_output,
             )
         except Exception as exc:
             raise ApiBackendError(
@@ -354,6 +370,21 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
             f"Divide into EXACTLY {inputs.target_pages} pages. "
             f"panel_count_hint between 3-6, vary for rhythm."
         )
+
+        # v0.5: 用户反馈驱动修订
+        if inputs.user_guidance:
+            prev_preview = ""
+            if inputs.previous_output:
+                prev_preview = json.dumps(inputs.previous_output, ensure_ascii=False, indent=2)[:1200]
+            user_msg += (
+                f"\n\n=== REVISION REQUEST ===\n"
+                f"Your previous script structure was:\n---\n{prev_preview}\n---\n\n"
+                f"The user reviewed it and provided this feedback:\n"
+                f'"{inputs.user_guidance}"\n\n'
+                f"Please revise the page outlines incorporating the user's feedback. "
+                f"Only change what the user asked you to change; keep everything else from the previous version."
+            )
+
         system_prompt = _PAGINATION_SYSTEM_PROMPT.format(language=lang)
 
         try:
@@ -392,6 +423,8 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
         char_context: str,
         language: str,
         chunk_size: int,
+        user_guidance: str = "",
+        previous_output: dict | None = None,
     ) -> list[ScriptPage]:
         """Process pages in chunks. Chunks are sequential; pages within a chunk
         are handled in ONE LLM call (Option A: max coherence)."""
@@ -421,6 +454,8 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
                 next_block_preview=next_block_preview,
                 char_context=char_context,
                 language=language,
+                user_guidance=user_guidance,
+                previous_output=previous_output,
             )
 
             all_script_pages.extend(chunk_pages_result)
@@ -447,6 +482,8 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
         next_block_preview: str | None,
         char_context: str,
         language: str,
+        user_guidance: str = "",
+        previous_output: dict | None = None,
     ) -> list[ScriptPage]:
         """Single LLM call for all pages in a chunk."""
         page_nums = [p["page_number"] for p in chunk_pages]
@@ -485,6 +522,21 @@ class ScriptAgent(BaseAgent[ScriptInput, ScriptOutput]):
             f"Return a JSON object with a 'pages' key containing the array "
             f"of expanded page objects."
         )
+
+        # v0.5: 用户反馈驱动修订
+        if user_guidance:
+            prev_preview = ""
+            if previous_output:
+                prev_pages = previous_output.get("pages", [])
+                prev_preview = json.dumps(prev_pages, ensure_ascii=False, indent=2)[:1200] if prev_pages else ""
+            user_msg += (
+                f"\n\n=== REVISION REQUEST ===\n"
+                f"Your previous panelization was:\n---\n{prev_preview}\n---\n\n"
+                f"The user reviewed it and provided this feedback:\n"
+                f'"{user_guidance}"\n\n'
+                f"Please revise the panels incorporating the user's feedback. "
+                f"Only change what the user asked you to change; keep everything else from the previous version."
+            )
 
         system_prompt = _CHUNK_PANELIZATION_SYSTEM_PROMPT.format(
             chunk_size=len(chunk_pages),

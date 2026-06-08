@@ -15,7 +15,6 @@ _PHASE_AGENTS = [
     ("storyboard_agent", "🎬 分镜"),
     ("image_agent", "🎨 图像"),
     ("layout_agent", "📐 排版"),
-    ("reviewer_agent", "✅ 审查"),
 ]
 
 _PHASE_AGENTS_V3 = [
@@ -75,8 +74,6 @@ def render_agent_grid(active: str = "", done: list[str] | None = None) -> str:
     cells = []
     for agent_id, label in _PHASE_AGENTS:
         cls = "cw-agent-pill"
-        if agent_id == "reviewer_agent":
-            cls += " review" if active == agent_id else ""
         if agent_id == active:
             cls += " active"
         elif agent_id in done:

@@ -235,8 +235,12 @@ class ComicWorkflow:
             await self._await_response()
             if self._last_decision != "regenerate":
                 break
+            # 保存上一轮输出作为反馈上下文
+            prev_output = state.get("developed_story", {})
             state["developed_story"] = {}
             if self._last_guidance:
+                inputs.user_guidance = self._last_guidance
+                inputs.previous_output = prev_output
                 writer(log_workflow_event("用户指导", self._last_guidance[:200]))
 
         elapsed = (time.perf_counter() - t0) * 1000
@@ -310,8 +314,11 @@ class ComicWorkflow:
             await self._await_response()
             if self._last_decision != "regenerate":
                 break
+            prev_output = state.get("structured_script", {})
             state["structured_script"] = {}
             if self._last_guidance:
+                inputs.user_guidance = self._last_guidance
+                inputs.previous_output = prev_output
                 writer(log_workflow_event("用户指导", self._last_guidance[:200]))
 
         elapsed = (time.perf_counter() - t0) * 1000
@@ -396,8 +403,11 @@ class ComicWorkflow:
             if self._last_decision != "regenerate":
                 break
             # 用户选择重新生成 → 清除旧数据
+            prev_output = state.get("character_db", {})
             state["character_db"] = {}
             if self._last_guidance:
+                inputs.user_guidance = self._last_guidance
+                inputs.previous_output = prev_output
                 writer(log_workflow_event("用户指导", self._last_guidance[:200]))
 
         elapsed = (time.perf_counter() - t0) * 1000
@@ -492,8 +502,11 @@ class ComicWorkflow:
             if self._last_decision != "regenerate":
                 break
             # 用户选择重新生成 → 清除旧数据
+            prev_output = state.get("storyboard_plan", [])
             state["storyboard_plan"] = []
             if self._last_guidance:
+                inputs.user_guidance = self._last_guidance
+                inputs.previous_output = prev_output if isinstance(prev_output, dict) else {"pages": prev_output}
                 writer(log_workflow_event("用户指导", self._last_guidance[:200]))
 
         elapsed = (time.perf_counter() - t0) * 1000
@@ -534,74 +547,97 @@ class ComicWorkflow:
             "layout_precomputed": True,
         }))
 
-        panel_idx = 0
-        for page in pages:
-            for panel in page.panels:
-                panel_idx += 1
-                # v0.4: Build reference_windows from character_db
-                ref_windows = self._build_ref_windows(panel, character_db)
-                # 传入 character_db 以启用固定种子 + 角色外观 prompt
-                inputs = ImageInput(
-                    panel_plan=panel,
-                    reference_windows=ref_windows,
-                    character_db=character_db,
-                    style_preset="black and white manga",
-                    width=image_sizes.get(panel.panel_id, (1024, 1024))[0],
-                    height=image_sizes.get(panel.panel_id, (1024, 1024))[1],
-                )
-                try:
-                    async for evt in self.image_agent.astream(inputs, ctx):
-                        writer(evt)
-                        if evt.type == StreamEventType.DONE and evt.content:
-                            pi = evt.content.get("panel_image")
-                            if pi:
-                                all_panel_images.append(pi)
-                                # 记录完整的 ComfyUI 生图参数
-                                writer(log_comfyui_request(
-                                    "image_agent",
-                                    kind="panel",
-                                    prompt=pi.get("prompt_used", ""),
-                                    negative_prompt=pi.get("negative_prompt_used", ""),
-                                    seed=pi.get("seed", 0),
-                                    width=pi.get("width", 0),
-                                    height=pi.get("height", 0),
-                                    workflow_path=self.config.image.workflow_panel_path,
-                                    metadata={
-                                        "panel_id": pi.get("panel_id", "?"),
-                                        "characters": pi.get("characters_present", []),
-                                        "backend": pi.get("backend", "?"),
-                                    },
-                                ))
-                                writer(log_comfyui_response(
-                                    "image_agent",
-                                    kind="panel",
-                                    image_path=pi.get("image_path", ""),
-                                    backend=pi.get("backend", "?"),
-                                    seed=pi.get("seed", 0),
-                                ))
-                            # 检测 fallback
-                            fallback_chain = evt.content.get("fallback_chain", [])
-                            if fallback_chain and len(fallback_chain) > 1:
-                                writer(log_fallback(
-                                    "image_agent",
-                                    fallback_chain[0],
-                                    fallback_chain[-1],
-                                ))
-                            writer(log_agent_output("image_agent",
-                                summarize_image_output(evt.content)))
-                except Exception as exc:
-                    writer(log_agent_error("image_agent",
-                        f"面板 {panel.panel_id} 生成失败: {exc}",
-                        {"panel_id": panel.panel_id, "panel_idx": panel_idx, "error_type": type(exc).__name__}))
-                    raise
+        # v0.5: 选择性重新生成 — 使用 while 循环支持 checkpoint 重回
+        import re as _re
 
-        state["panel_images"] = all_panel_images
-        elapsed = (time.perf_counter() - t0) * 1000
-        writer(log_performance("image_agent", elapsed, status=f"{len(all_panel_images)}/{total_panels} panels"))
+        while True:
+            all_panel_images = []
+            # 从 state 读取上一轮图像与用户引导（首次进入为空）
+            image_guidance = state.pop("_image_guidance", "")
+            image_prev_output = state.pop("_image_prev_output", [])
+            prev_image_map: dict[str, dict] = {}
+            for pi in image_prev_output:
+                pid = pi.get("panel_id", "")
+                if pid:
+                    prev_image_map[pid] = pi
+            # 解析用户反馈中提及的面板 ID（如 page_001_p01）
+            target_panel_ids: set[str] = set()
+            if image_guidance:
+                target_panel_ids = set(_re.findall(r'page_\d+_p\d+', image_guidance))
+            has_prev = bool(prev_image_map)
 
-        # --- Checkpoint & auto-save (介于图像生成与台词气泡之间) ---
-        self._save_checkpoint(state)
-        if should_pause(state, "after_image"):
+            panel_idx = 0
+            for page in pages:
+                for panel in page.panels:
+                    panel_idx += 1
+                    # v0.5: 选择性跳过 — 已有图像且非目标面板则复用
+                    if has_prev and panel.panel_id in prev_image_map and panel.panel_id not in target_panel_ids:
+                        all_panel_images.append(prev_image_map[panel.panel_id])
+                        writer(log_workflow_event("跳过面板", f"{panel.panel_id} — 复用已有图像"))
+                        continue
+                    ref_windows = self._build_ref_windows(panel, character_db)
+                    inputs = ImageInput(
+                        panel_plan=panel,
+                        reference_windows=ref_windows,
+                        character_db=character_db,
+                        style_preset="black and white manga",
+                        width=image_sizes.get(panel.panel_id, (1024, 1024))[0],
+                        height=image_sizes.get(panel.panel_id, (1024, 1024))[1],
+                        user_guidance=image_guidance,
+                        previous_output=prev_image_map.get(panel.panel_id),
+                    )
+                    try:
+                        async for evt in self.image_agent.astream(inputs, ctx):
+                            writer(evt)
+                            if evt.type == StreamEventType.DONE and evt.content:
+                                pi = evt.content.get("panel_image")
+                                if pi:
+                                    all_panel_images.append(pi)
+                                    writer(log_comfyui_request(
+                                        "image_agent",
+                                        kind="panel",
+                                        prompt=pi.get("prompt_used", ""),
+                                        negative_prompt=pi.get("negative_prompt_used", ""),
+                                        seed=pi.get("seed", 0),
+                                        width=pi.get("width", 0),
+                                        height=pi.get("height", 0),
+                                        workflow_path=self.config.image.workflow_panel_path,
+                                        metadata={
+                                            "panel_id": pi.get("panel_id", "?"),
+                                            "characters": pi.get("characters_present", []),
+                                            "backend": pi.get("backend", "?"),
+                                        },
+                                    ))
+                                    writer(log_comfyui_response(
+                                        "image_agent",
+                                        kind="panel",
+                                        image_path=pi.get("image_path", ""),
+                                        backend=pi.get("backend", "?"),
+                                        seed=pi.get("seed", 0),
+                                    ))
+                                fallback_chain = evt.content.get("fallback_chain", [])
+                                if fallback_chain and len(fallback_chain) > 1:
+                                    writer(log_fallback(
+                                        "image_agent",
+                                        fallback_chain[0],
+                                        fallback_chain[-1],
+                                    ))
+                                writer(log_agent_output("image_agent",
+                                    summarize_image_output(evt.content)))
+                    except Exception as exc:
+                        writer(log_agent_error("image_agent",
+                            f"面板 {panel.panel_id} 生成失败: {exc}",
+                            {"panel_id": panel.panel_id, "panel_idx": panel_idx, "error_type": type(exc).__name__}))
+                        raise
+
+            state["panel_images"] = all_panel_images
+            elapsed = (time.perf_counter() - t0) * 1000
+            writer(log_performance("image_agent", elapsed, status=f"{len(all_panel_images)}/{total_panels} panels"))
+
+            # --- Checkpoint & auto-save ---
+            self._save_checkpoint(state)
+            if not should_pause(state, "after_image"):
+                break
             writer(CheckpointSignal(
                 checkpoint_id="after_image",
                 label=KEY_CHECKPOINTS["after_image"],
@@ -609,16 +645,19 @@ class ComicWorkflow:
                     "phase": state.get("current_phase", "?"),
                     "project_id": state.get("project_id", "?"),
                     "panel_count": len(all_panel_images),
+                    "panel_ids": [p.panel_id for page in pages for p in page.panels],
                 },
             ))
             await self._await_response()
-            if self._last_decision == "regenerate":
-                state["panel_images"] = []
-                state["bubble_placements"] = {}
-                if self._last_guidance:
-                    writer(log_workflow_event("用户指导", self._last_guidance[:200]))
-                writer(WorkflowMessage(WorkflowEvent.NODE_END, "image_agent"))
-                return state
+            if self._last_decision != "regenerate":
+                break
+            # 保存旧图像以便选择性重新生成，下一轮 while 迭代使用
+            state["_image_guidance"] = self._last_guidance or ""
+            state["_image_prev_output"] = list(all_panel_images)
+            state["panel_images"] = []
+            state["bubble_placements"] = {}
+            if self._last_guidance:
+                writer(log_workflow_event("用户指导", self._last_guidance[:200]))
 
         writer(WorkflowMessage(WorkflowEvent.NODE_END, "image_agent"))
         return state
@@ -694,8 +733,11 @@ class ComicWorkflow:
             await self._await_response()
             if self._last_decision != "regenerate":
                 break
+            prev_output = state.get("bubble_placements", {})
             state["bubble_placements"] = {}
             if self._last_guidance:
+                inputs.user_guidance = self._last_guidance
+                inputs.previous_output = prev_output
                 writer(log_workflow_event("用户指导", self._last_guidance[:200]))
 
         elapsed = (time.perf_counter() - t0) * 1000
@@ -776,9 +818,12 @@ class ComicWorkflow:
             if self._last_decision != "regenerate":
                 break
             # 用户选择重新生成 → 清除旧数据
+            prev_output = {"final_pages": state.get("final_pages", []), "exports": state.get("exports", [])}
             state["final_pages"] = []
             state["exports"] = []
             if self._last_guidance:
+                inputs.user_guidance = self._last_guidance
+                inputs.previous_output = prev_output
                 writer(log_workflow_event("用户指导", self._last_guidance[:200]))
 
         elapsed = (time.perf_counter() - t0) * 1000

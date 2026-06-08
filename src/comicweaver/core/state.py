@@ -64,8 +64,7 @@ class ComicState(TypedDict, total=False):
     exports: list[dict]
     export_format: str
 
-    # 审查与交互
-    review_results: list[dict]
+    # 交互反馈
     retry_counts: dict
     pending_checkpoint: dict | None
     user_decisions: list
@@ -112,7 +111,6 @@ def make_initial_state(
         final_pages=[],
         exports=[],
         export_format="png",
-        review_results=[],
         retry_counts={},
         pending_checkpoint=None,
         user_decisions=[],
