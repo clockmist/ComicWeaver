@@ -14,6 +14,7 @@ Design principle:
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -21,6 +22,8 @@ from comicweaver.core.schema import BoundingBox, BubbleHint
 
 if TYPE_CHECKING:
     from comicweaver.core.schema import Dialogue, PanelImage, PanelPlan
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -336,8 +339,16 @@ def calculate_bubble_size(
 # Smart bubble position
 # ---------------------------------------------------------------------------
 
-# 8 个候选位置（比原来的 6 个更丰富）
-_POSITION_CANDIDATES: list[tuple[str, float, float, str]] = [
+# 四角候选位 — 当有人物但未检测到人脸时使用，避免遮挡角色
+_CORNER_CANDIDATES: list[tuple[str, float, float, str]] = [
+    ("bottom_left",   0.02, 0.65, "up_right"),
+    ("bottom_right",  0.55, 0.65, "up_left"),
+    ("top_left",      0.02, 0.02, "down_right"),
+    ("top_right",     0.55, 0.02, "down_left"),
+]
+
+# 分散候选位 — 当无人物（纯场景面板）时使用，均匀分布气泡
+_DISPERSED_CANDIDATES: list[tuple[str, float, float, str]] = [
     ("top_left",      0.02, 0.02, "down_right"),
     ("top_right",     0.55, 0.02, "down_left"),
     ("top_center",    0.25, 0.02, "down"),
@@ -348,26 +359,200 @@ _POSITION_CANDIDATES: list[tuple[str, float, float, str]] = [
     ("mid_right",     0.55, 0.35, "left"),
 ]
 
+_GRID_SIZE: int = 5  # 5×5 = 25 个网格候选点
 
-def _min_face_distance(
+
+def _build_grid_candidates(
+    panel_bbox: "BoundingBox",
+    bubble_w: float,
+    bubble_h: float,
+) -> list[tuple[float, float]]:
+    """在面板内生成 5×5 均匀网格的气泡中心候选点。
+
+    网格点均匀分布在面板内部，为每个气泡留出尺寸边距，
+    确保气泡不会超出面板边界。返回 (center_x, center_y) 列表。
+    """
+    margin_x = bubble_w / 2 + 0.02
+    margin_y = bubble_h / 2 + 0.02
+
+    x_min = panel_bbox.x + margin_x
+    x_max = panel_bbox.x + panel_bbox.width - margin_x
+    y_min = panel_bbox.y + margin_y
+    y_max = panel_bbox.y + panel_bbox.height - margin_y
+
+    # 钳制：防止气泡尺寸过大导致可用区域为负
+    if x_min >= x_max:
+        x_mid = panel_bbox.x + panel_bbox.width / 2
+        x_min = x_mid - 0.01
+        x_max = x_mid + 0.01
+    if y_min >= y_max:
+        y_mid = panel_bbox.y + panel_bbox.height / 2
+        y_min = y_mid - 0.01
+        y_max = y_mid + 0.01
+
+    candidates: list[tuple[float, float]] = []
+    for iy in range(_GRID_SIZE):
+        y = y_min + (y_max - y_min) * iy / (_GRID_SIZE - 1)
+        for ix in range(_GRID_SIZE):
+            x = x_min + (x_max - x_min) * ix / (_GRID_SIZE - 1)
+            candidates.append((x, y))
+    return candidates
+
+
+def _faces_to_page_coords(faces: list, panel_bbox: "BoundingBox") -> list[dict]:
+    """将人脸坐标从面板图像空间 [0,1] 转换到页面全局空间。
+
+    YOLO 返回的人脸坐标是相对于单个面板图像的归一化坐标，
+    而气泡放置使用的是页面全局归一化坐标。此函数将人脸区域
+    转换为页面空间，使重叠检测和距离计算在同一坐标系下进行。
+    """
+    if not faces:
+        return []
+    result: list[dict] = []
+    for f in faces:
+        fx = f.x if hasattr(f, 'x') else f.get("x", 0)
+        fy = f.y if hasattr(f, 'y') else f.get("y", 0)
+        fw = f.w if hasattr(f, 'w') else f.get("w", 0)
+        fh = f.h if hasattr(f, 'h') else f.get("h", 0)
+        result.append({
+            "x": panel_bbox.x + fx * panel_bbox.width,
+            "y": panel_bbox.y + fy * panel_bbox.height,
+            "w": fw * panel_bbox.width,
+            "h": fh * panel_bbox.height,
+        })
+    return result
+
+
+def _bbox_overlap(
+    bx: float, by: float, bw: float, bh: float,
+    fx: float, fy: float, fw: float, fh: float,
+) -> bool:
+    """检测气泡 bbox 与人脸 bbox 是否重叠。"""
+    return (bx < fx + fw and bx + bw > fx
+            and by < fy + fh and by + bh > fy)
+
+
+def _bbox_min_separation(
     bx: float, by: float, bw: float, bh: float,
     faces: list,
 ) -> float:
-    """计算气泡到最近人脸中心的距离（归一化坐标）。"""
+    """计算气泡 bbox 到最近人脸 bbox 的最小边到边距离。
+
+    若气泡与任一人脸重叠 → 返回 0.0。
+    若所有面都不重叠 → 返回最近边到边的欧氏距离。
+    """
     if not faces:
         return float("inf")
-    bcx = bx + bw / 2
-    bcy = by + bh / 2
+
     best = float("inf")
     for f in faces:
-        fx = f.x + f.w / 2 if hasattr(f, 'x') else f.get("x", 0) + f.get("w", 0) / 2
-        fy = f.y + f.h / 2 if hasattr(f, 'y') else f.get("y", 0) + f.get("h", 0) / 2
-        dx = bcx - fx
-        dy = bcy - fy
-        dist = (dx * dx + dy * dy) ** 0.5
-        if dist < best:
-            best = dist
+        fx = f.x if hasattr(f, 'x') else f.get("x", 0)
+        fy = f.y if hasattr(f, 'y') else f.get("y", 0)
+        fw = f.w if hasattr(f, 'w') else f.get("w", 0)
+        fh = f.h if hasattr(f, 'h') else f.get("h", 0)
+
+        h_overlap = bx < fx + fw and bx + bw > fx
+        v_overlap = by < fy + fh and by + bh > fy
+
+        if h_overlap and v_overlap:
+            return 0.0  # 重叠 → 立即判死刑
+
+        if h_overlap:
+            # 仅垂直分离
+            sep = min(abs(by - (fy + fh)), abs(fy - (by + bh)))
+        elif v_overlap:
+            # 仅水平分离
+            sep = min(abs(bx - (fx + fw)), abs(fx - (bx + bw)))
+        else:
+            # 对角分离：两个轴上均不重叠
+            dx = max(fx - (bx + bw), bx - (fx + fw), 0)
+            dy = max(fy - (by + bh), by - (fy + fh), 0)
+            sep = (dx * dx + dy * dy) ** 0.5
+
+        if sep < best:
+            best = sep
+
     return best
+
+
+def _score_grid_candidate(
+    bcx: float,
+    bcy: float,
+    bubble_w: float,
+    bubble_h: float,
+    faces: list,
+    existing_bubbles: list["BubblePlacement"],
+    panel_bbox: "BoundingBox",
+) -> float:
+    """对网格候选点计算综合评分（越高越优，≤0 表示不合格）。
+
+    评分公式：
+        0.50 × 人脸避让分（bbox 边到边距离，重叠直接判负）
+        + 0.30 × 角落亲和力分（距最近面板角落的距离，越近越高）
+        + 0.20 × 气泡间避让分
+
+    若气泡 bbox 与任一人脸 bbox 重叠 → 返回 -1.0 直接淘汰。
+    """
+    score = 0.0
+
+    # ---- 因子 1: 人脸避让 (权重 0.50，一票否决) ----
+    bx = bcx - bubble_w / 2
+    by = bcy - bubble_h / 2
+    min_face_sep = _bbox_min_separation(bx, by, bubble_w, bubble_h, faces)
+    if min_face_sep <= 0.0:
+        return -1.0  # 与人脸重叠 → 直接淘汰
+    # 甜点距离评分：最佳距离 0.08，太近(0)或太远(≥0.30)都降分
+    # 避免气泡贴脸也避免气泡飞太远显得脱节
+    sweet_spot = 0.08   # 最佳距离（页面宽度的 8%）
+    far_limit = 0.30    # 超过此距离评分归零
+    if min_face_sep <= sweet_spot:
+        face_score = min_face_sep / sweet_spot           # 0 → 1.0
+    else:
+        face_score = max(0.0, 1.0 - (min_face_sep - sweet_spot) / (far_limit - sweet_spot))  # 1.0 → 0
+    score += 0.50 * face_score
+
+    # ---- 因子 2: 角落亲和力 (权重 0.30) ----
+    # 漫画气泡最安全的位置是面板四角。计算气泡中心到最近角落的欧氏距离。
+    corners = [
+        (panel_bbox.x, panel_bbox.y),                                        # top-left
+        (panel_bbox.x + panel_bbox.width, panel_bbox.y),                     # top-right
+        (panel_bbox.x, panel_bbox.y + panel_bbox.height),                    # bottom-left
+        (panel_bbox.x + panel_bbox.width, panel_bbox.y + panel_bbox.height), # bottom-right
+    ]
+    min_corner_dist = min(
+        ((bcx - cx) ** 2 + (bcy - cy) ** 2) ** 0.5
+        for cx, cy in corners
+    )
+    # 距离 0（紧贴角落）→ 1.0，距离 ≥ 面板对角线的 35% → 0
+    corner_score = max(0.0, 1.0 - min_corner_dist / 0.35)
+    score += 0.30 * corner_score
+
+    # ---- 因子 3: 气泡间避让 (权重 0.20) ----
+    if existing_bubbles:
+        min_bubble_dist = float("inf")
+        for eb in existing_bubbles:
+            # 对已有气泡也用边到边距离
+            eb_overlap = _bbox_overlap(
+                bx, by, bubble_w, bubble_h,
+                eb.x, eb.y, eb.w, eb.h,
+            )
+            if eb_overlap:
+                # 与另一气泡重叠 → 降低评分
+                if min_bubble_dist > 0.0:
+                    min_bubble_dist = 0.0
+            else:
+                ecx = eb.x + eb.w / 2
+                ecy = eb.y + eb.h / 2
+                dist = ((bcx - ecx) ** 2 + (bcy - ecy) ** 2) ** 0.5
+                if dist < min_bubble_dist:
+                    min_bubble_dist = dist
+        # 距离 ≥ 0.15 即满分
+        bubble_score = min(min_bubble_dist / 0.15, 1.0)
+    else:
+        bubble_score = 1.0
+    score += 0.20 * bubble_score
+
+    return score
 
 
 def smart_bubble_position(
@@ -377,50 +562,87 @@ def smart_bubble_position(
     bubble_h: float,
     dialogue_index: int,
     num_dialogues: int,
-    hint_position: str | None = None,
+    has_characters: bool = False,
+    existing_bubbles: list["BubblePlacement"] | None = None,
 ) -> tuple[float, float, str]:
-    """根据人脸信息智能选择气泡位置和尾部方向。
+    """根据人脸/角色信息智能选择气泡位置和尾部方向。
 
-    策略：
-    1. 有 BubbleHint 位置 → 优先使用（从 8 个候选位置中匹配或按锚点放置）
-    2. 无人脸 → 按 dialogue_index 分配到不同候选位置，分散放置
-    3. 有人脸 → 选离所有人脸最远的候选位置
+    策略（优先级递减）：
+    1. 检测到人脸 → 5×5 网格 + 多维度评分
+    2. 有人物但无人脸 → 仅四角
+    3. 无人物（纯场景）→ 8 个分散候选位循环
     """
-    if not faces:
-        # 无角色面板：按 dialogue_index 分配分散到不同角落
-        # 如果 hint 提供了位置，匹配到最近的候选位置
-        if hint_position:
-            anchor = _POSITION_ANCHORS.get(hint_position)
-            if anchor:
-                ax = panel_bbox.x + panel_bbox.width * anchor[0]
-                ay = panel_bbox.y + panel_bbox.height * anchor[1]
-                ax = max(panel_bbox.x + 0.01, min(ax, panel_bbox.x + panel_bbox.width - bubble_w - 0.01))
-                ay = max(panel_bbox.y + 0.01, min(ay, panel_bbox.y + panel_bbox.height - bubble_h - 0.01))
-                tail = _derive_tail_direction(ax + bubble_w / 2, ay + bubble_h / 2, panel_bbox)
-                return ax, ay, tail
+    if existing_bubbles is None:
+        existing_bubbles = []
 
-        idx = dialogue_index % len(_POSITION_CANDIDATES)
-        _label, ax_ratio, ay_ratio, tail = _POSITION_CANDIDATES[idx]
-        bx = panel_bbox.x + panel_bbox.width * ax_ratio
-        by = panel_bbox.y + panel_bbox.height * ay_ratio
-        bx = max(panel_bbox.x + 0.01, min(bx, panel_bbox.x + panel_bbox.width - bubble_w - 0.01))
-        by = max(panel_bbox.y + 0.01, min(by, panel_bbox.y + panel_bbox.height - bubble_h - 0.01))
-        return bx, by, tail
+    # ---- 策略 1: 有人脸 → 5×5 网格 + 多维评分 ----
+    if faces:
+        # 2a. 若人脸总面积超过面板 40%，网格无意义 → 直接退至四角
+        panel_area = panel_bbox.width * panel_bbox.height
+        total_face_area = sum(
+            (f.w if hasattr(f, 'w') else f.get('w', 0))
+            * (f.h if hasattr(f, 'h') else f.get('h', 0))
+            for f in faces
+        )
+        face_area_ratio = total_face_area / panel_area if panel_area > 0 else 0.0
 
-    # 有人脸：找最优候选位置（离所有人脸最远）
-    best_dist = -1.0
-    best = (_POSITION_CANDIDATES[0][1], _POSITION_CANDIDATES[0][2], _POSITION_CANDIDATES[0][3])
-    for _label, ax_ratio, ay_ratio, tail in _POSITION_CANDIDATES:
-        bx = panel_bbox.x + panel_bbox.width * ax_ratio
-        by = panel_bbox.y + panel_bbox.height * ay_ratio
-        bx = max(panel_bbox.x + 0.01, min(bx, panel_bbox.x + panel_bbox.width - bubble_w - 0.01))
-        by = max(panel_bbox.y + 0.01, min(by, panel_bbox.y + panel_bbox.height - bubble_h - 0.01))
-        dist = _min_face_distance(bx, by, bubble_w, bubble_h, faces)
-        if dist > best_dist:
-            best_dist = dist
-            best = (bx, by, tail)
+        if face_area_ratio > 0.40:
+            # 人脸占据面板大部 — 回退到四角策略
+            idx = dialogue_index % len(_CORNER_CANDIDATES)
+            _label, ax_ratio, ay_ratio, tail = _CORNER_CANDIDATES[idx]
+            bx = panel_bbox.x + panel_bbox.width * ax_ratio
+            by = panel_bbox.y + panel_bbox.height * ay_ratio
+            # 宽松钳制：允许气泡出框
+            bx = max(-bubble_w * 0.5, min(bx, 1.0 - bubble_w * 0.5))
+            by = max(-bubble_h * 0.5, min(by, 1.0 - bubble_h * 0.5))
+            return bx, by, tail
 
-    return best
+        # 2b. 正常情况 — 5×5 网格评分
+        grid = _build_grid_candidates(panel_bbox, bubble_w, bubble_h)
+        best_score = -1.0
+        best_bx = best_by = 0.0
+        for cx, cy in grid:
+            score = _score_grid_candidate(
+                cx, cy, bubble_w, bubble_h, faces,
+                existing_bubbles, panel_bbox,
+            )
+            if score > best_score:
+                best_score = score
+                best_bx = cx - bubble_w / 2
+                best_by = cy - bubble_h / 2
+
+        if best_score <= 0.0:
+            # 全部网格点都与人脸重叠 → 退至四角策略
+            idx = dialogue_index % len(_CORNER_CANDIDATES)
+            _label, ax_ratio, ay_ratio, tail = _CORNER_CANDIDATES[idx]
+            best_bx = panel_bbox.x + panel_bbox.width * ax_ratio
+            best_by = panel_bbox.y + panel_bbox.height * ay_ratio
+
+        # 宽松钳制：仅防气泡完全跑出页面，不阻止合理的面板边缘出框
+        best_bx = max(-bubble_w * 0.5, min(best_bx, 1.0 - bubble_w * 0.5))
+        best_by = max(-bubble_h * 0.5, min(best_by, 1.0 - bubble_h * 0.5))
+
+        best_tail = _derive_tail_direction(
+            best_bx + bubble_w / 2, best_by + bubble_h / 2, panel_bbox,
+        )
+        return best_bx, best_by, best_tail
+
+    # ---- 策略 3 & 4: 无人脸 → 根据角色存在选择候选集 ----
+    if has_characters:
+        # 有人物但未检测到人脸 → 仅四角，避免遮挡角色
+        candidates = _CORNER_CANDIDATES
+    else:
+        # 无人物（纯场景面板）→ 8 个分散候选位
+        candidates = _DISPERSED_CANDIDATES
+
+    idx = dialogue_index % len(candidates)
+    _label, ax_ratio, ay_ratio, tail = candidates[idx]
+    bx = panel_bbox.x + panel_bbox.width * ax_ratio
+    by = panel_bbox.y + panel_bbox.height * ay_ratio
+    # 宽松钳制：允许气泡出框
+    bx = max(-bubble_w * 0.5, min(bx, 1.0 - bubble_w * 0.5))
+    by = max(-bubble_h * 0.5, min(by, 1.0 - bubble_h * 0.5))
+    return bx, by, tail
 
 
 # ---------------------------------------------------------------------------
@@ -520,8 +742,9 @@ def place_bubbles(
         if not dialogues and not narration_text:
             continue
 
-        # 该面板的人脸检测结果
+        # 该面板的人脸检测结果 → 转换到页面全局坐标系
         panel_faces = faces_by_panel.get(panel.panel_id, [])
+        page_faces = _faces_to_page_coords(panel_faces, bbox)
 
         # Build hint lookup keyed by dialogue_index
         hint_map: dict[int, BubbleHint] = {}
@@ -537,6 +760,9 @@ def place_bubbles(
         emotion = getattr(panel, "emotion_intensity", 0.5) or 0.5
 
         num_dialogues = len(dialogues)
+
+        # 判断面板是否有人物角色（决定无人脸时的候选位置策略）
+        has_characters = bool(getattr(panel, "characters_in_panel", None))
 
         # Place each dialogue
         for di, dialogue in enumerate(dialogues):
@@ -558,13 +784,15 @@ def place_bubbles(
                 bubble_font_pt = font_size_pt
 
             # ---- 智能位置选择 ----
-            hint_pos = hint.suggested_position if hint else None
+            # 收集当前面板已有气泡（用于气泡间避让）
+            panel_existing = [b for b in all_bubbles if b.panel_id == panel.panel_id]
             bx, by, tail_dir = smart_bubble_position(
-                bbox, panel_faces,
+                bbox, page_faces,
                 w_norm, h_norm,
                 dialogue_index=di,
                 num_dialogues=num_dialogues,
-                hint_position=hint_pos,
+                has_characters=has_characters,
+                existing_bubbles=panel_existing,
             )
 
             # ---- 样式参数 ----
