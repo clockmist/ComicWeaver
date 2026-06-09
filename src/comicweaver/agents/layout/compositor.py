@@ -282,6 +282,16 @@ def compose_page(
     inner_w = width_px - margin_px * 2
     inner_h = height_px - margin_px * 2
 
+    # --- Build panel pixel-bbox map for bubble clamping ---
+    panel_px_bbox: dict[str, tuple[int, int, int, int]] = {}
+    for slot in panel_slots:
+        px = margin_px + int(inner_w * slot.bbox.x)
+        py = margin_px + int(inner_h * slot.bbox.y)
+        pw = int(inner_w * slot.bbox.width)
+        ph = int(inner_h * slot.bbox.height)
+        if pw >= 10 and ph >= 10:
+            panel_px_bbox[slot.panel_id] = (px, py, px + pw, py + ph)
+
     # --- Paste panel images ---
     for slot in panel_slots:
         pi = panel_images.get(slot.panel_id)
@@ -318,7 +328,7 @@ def compose_page(
         )
 
     # --- Render dialogue bubbles ---
-    _render_bubbles(draw, bubbles, margin_px, inner_w, inner_h, bg_color, font_size_pt)
+    _render_bubbles(draw, bubbles, margin_px, inner_w, inner_h, bg_color, font_size_pt, panel_px_bbox)
 
     # --- Page number ---
     num_font = _safe_font(20)
@@ -454,17 +464,37 @@ def _render_bubbles(
     inner_h: int,
     bg_color: tuple[int, int, int],
     font_size_pt: int = 14,
+    panel_px_bbox: dict[str, tuple[int, int, int, int]] | None = None,
 ) -> None:
     """Dispatch each bubble to its type-specific renderer.
 
     每个气泡使用自身的 font_size_pt（由 BubbleAgent 根据面板大小自适应计算），
     渲染函数内部会从 bp.style 读取样式参数（fill/outline/border/radius/tail）。
+    气泡位置会被钳制在其所属面板的像素边界内。
     """
     for bp in bubbles:
         bx = margin_px + int(inner_w * bp.x)
         by = margin_px + int(inner_h * bp.y)
         bw = int(inner_w * bp.w)
         bh = int(inner_h * bp.h)
+
+        # 钳制到面板像素边界内（排版阶段兜底保护）
+        if panel_px_bbox and bp.panel_id in panel_px_bbox:
+            p_x1, p_y1, p_x2, p_y2 = panel_px_bbox[bp.panel_id]
+            if bx < p_x1:
+                bw -= (p_x1 - bx)
+                bx = p_x1
+            if by < p_y1:
+                bh -= (p_y1 - by)
+                by = p_y1
+            if bx + bw > p_x2:
+                bw = p_x2 - bx
+            if by + bh > p_y2:
+                bh = p_y2 - by
+
+        if bw < 10 or bh < 10:
+            continue
+
         body = (bx, by, bx + bw, by + bh)
 
         # 使用气泡自身的字体大小（兜底全局参数）

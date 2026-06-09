@@ -284,9 +284,17 @@ async def _consume_workflow(session: Session) -> None:
                     "content": content,
                     "timestamp": msg.timestamp,
                 })
-    except (asyncio.CancelledError, GeneratorExit, RuntimeError):
-        # 工作流被取消或异步生成器被关闭，静默清理
+    except asyncio.CancelledError:
+        # 工作流被取消，静默清理
         pass
+    except (GeneratorExit, RuntimeError) as exc:
+        # 异步生成器/事件循环异常关闭 — 记录警告但不崩溃
+        session.event_log.append({
+            "agent": "workflow",
+            "type": "warning",
+            "content": f"工作流异步清理: {exc.__class__.__name__}: {exc}",
+            "timestamp": time.time(),
+        })
     except Exception as exc:  # noqa: BLE001
         session.error = str(exc)
         session.event_log.append({

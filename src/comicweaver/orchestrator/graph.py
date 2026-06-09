@@ -372,8 +372,8 @@ class ComicWorkflow:
                                 prompt=cp.get("base_reference", {}).get("generation_prompt", ""),
                                 negative_prompt="(see agent hardcoded negative)",
                                 seed=cp.get("seed", 0),
-                                width=1024,
-                                height=1024,
+                                width=832,
+                                height=1216,
                                 workflow_path=self.config.image.workflow_character_path,
                                 metadata={
                                     "char_id": cid,
@@ -916,11 +916,13 @@ class ComicWorkflow:
         }
         self._current_config = config
         prev_phase = state.get("current_phase", "init")
+        astream = None
 
         try:
-            async for mode, data in self._compiled.astream(
+            astream = self._compiled.astream(
                 state, config, stream_mode=["custom", "updates"]
-            ):
+            )
+            async for mode, data in astream:
                 if mode == "custom":
                     yield data
                 elif mode == "updates":
@@ -943,6 +945,14 @@ class ComicWorkflow:
                 {"error": str(exc), "type": exc.__class__.__name__},
             )
             raise
+        finally:
+            # 确保 LangGraph astream 被正确关闭，避免内部挂起 task
+            # 在 GC 清理时因 event loop 丢失导致的 RuntimeError 连锁报错
+            if astream is not None:
+                try:
+                    await astream.aclose()
+                except Exception:
+                    pass
 
         total_elapsed = (time.perf_counter() - workflow_t0) * 1000
         yield log_performance("workflow(total)", total_elapsed)

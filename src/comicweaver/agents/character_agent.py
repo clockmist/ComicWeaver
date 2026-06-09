@@ -129,12 +129,12 @@ class CharacterAgent(BaseAgent[CharacterInput, CharacterOutput]):
     ) -> str:
         if self.config.image.is_available:
             # 使用 LLM 生成的 Danbooru Tag 构建人设图 Prompt
-            # 风格前缀 + 角色 Tag + 构图描述（构图部分保持硬编码以确保胸像效果）
+            # 风格前缀 + 角色 Tag + 构图描述（构图部分保持硬编码以确保全身像效果）
             char_tags = core_tags or draft.appearance
             composition = (
-                "portrait, head and shoulders, "
-                "looking at viewer, entire head visible, full hair in frame, "
-                "centered framing, ample headroom, "
+                "full body, standing, "
+                "looking at viewer, entire body visible, "
+                "centered framing, "
                 "simple background, white background, "
                 "neutral expression, front view"
             )
@@ -162,8 +162,8 @@ class CharacterAgent(BaseAgent[CharacterInput, CharacterOutput]):
                 kind="character_reference",
                 prompt=positive,
                 negative_prompt=negative,
-                width=1024,
-                height=1024,
+                width=832,
+                height=1216,
                 seed=seed,
                 workflow_path=self.config.image.workflow_character_path,
                 metadata={"char_id": draft.char_id, "name": draft.name},

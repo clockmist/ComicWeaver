@@ -108,21 +108,6 @@ def _load_font(size: int) -> "ImageFont.ImageFont":
     return ImageFont.load_default()
 
 
-def estimate_text_size(
-    text: str,
-    font_size_pt: int = 12,
-    max_width_px: int = 200,
-) -> tuple[int, int]:
-    """Measure the actual pixel size needed to render *text* using PIL.
-
-    Loads the real CJK font at *font_size_pt*, measures each character's
-    width with ``textbbox()``, and wraps lines at *max_width_px*.
-
-    Returns (width_px, height_px) including padding.
-    """
-    if not text:
-        return (80, 30)
-
 _EMPTY_IMAGE = None
 
 
@@ -188,9 +173,12 @@ def estimate_text_size(
     width = int(max_w) + pad * 2 + 4  # +4 for safety margin
     height = text_h + pad * 2
 
-    # Clamp to reasonable limits
-    width = max(80, min(width, 700))
-    height = max(40, min(height, 500))
+    # Soft lower-bound only — don't clamp upper bound so long text can grow
+    # the bubble appropriately.  The caller (calculate_bubble_size) is
+    # responsible for capping to panel dimensions and reducing font-size
+    # when the result still won't fit.
+    width = max(80, width)
+    height = max(40, height)
 
     return width, height
 
@@ -274,7 +262,8 @@ def calculate_bubble_size(
     """根据面板大小、景别和情感强度计算椭圆气泡尺寸和字号。
 
     策略：按字号确定每行约 8 个 CJK 字 → 换行测量 → 按椭圆可用面积（75%）
-    换算椭圆外框 → 约束宽高比（1.3:1 ~ 4.0:1）→ +5% 呼吸空间。
+    换算椭圆外框 → 约束宽高比（1.3:1 ~ 4.0:1）→ +5% 呼吸空间 →
+    若气泡超出面板则逐级缩小字号重测，直到适配或到达最小可读字号。
     """
     inner_w = page_width_px - margin_px * 2
     inner_h = page_height_px - margin_px * 2
@@ -302,37 +291,53 @@ def calculate_bubble_size(
     base_font = int(base_font * multiplier)
     base_font = max(14, min(38, base_font))
 
-    # Step 1: 按字号确定文本换行宽度（每行约 8 个 CJK 字）
-    text_max_w = int(base_font * 8)
-    text_max_w = max(120, min(260, text_max_w))
+    # ── 长文本字体缩放循环 ──
+    # 气泡高度不应超过面板高度的 65%，宽度不应超过 85%
+    max_bubble_h_norm = panel_bbox.height * 0.65
+    max_bubble_w_norm = panel_bbox.width * 0.85
+    MIN_READABLE_FONT = 10  # 最小可读字号，不可再缩
 
-    # Step 2: 换行测量
-    text_w_px, text_h_px = estimate_text_size(text, base_font, max_width_px=text_max_w)
+    current_font = base_font
+    while current_font >= MIN_READABLE_FONT:
+        # Step 1: 按字号确定文本换行宽度（每行约 8 个 CJK 字）
+        text_max_w = int(current_font * 8)
+        text_max_w = max(120, min(280, text_max_w))
 
-    # Step 3: 椭圆外框 = 文本 / 0.75（文本占椭圆 75%，inset ~12.5% 各边）
-    ellipse_w = int(text_w_px / 0.75)
-    ellipse_h = int(text_h_px / 0.75)
+        # Step 2: 换行测量
+        text_w_px, text_h_px = estimate_text_size(text, current_font, max_width_px=text_max_w)
 
-    # Step 4: 约束宽高比 1.3:1 ~ 4.0:1
-    aspect = ellipse_w / max(ellipse_h, 1)
-    if aspect > 4.0:
-        ellipse_h = int(ellipse_w / 2.8)
-    elif aspect < 1.3:
-        ellipse_w = int(ellipse_h * 1.7)
+        # Step 3: 椭圆外框 = 文本 / 0.75（文本占椭圆 75%，inset ~12.5% 各边）
+        ellipse_w = int(text_w_px / 0.75)
+        ellipse_h = int(text_h_px / 0.75)
 
-    # Step 5: 呼吸空间 +5%
-    ellipse_w = int(ellipse_w * 1.05)
-    ellipse_h = int(ellipse_h * 1.05)
+        # Step 4: 约束宽高比 1.3:1 ~ 4.0:1
+        aspect = ellipse_w / max(ellipse_h, 1)
+        if aspect > 4.0:
+            ellipse_h = int(ellipse_w / 2.8)
+        elif aspect < 1.3:
+            ellipse_w = int(ellipse_h * 1.7)
 
-    # Step 6: 最小/最大约束
-    ellipse_w = max(100, min(ellipse_w, inner_w - 20))
-    ellipse_h = max(60, min(ellipse_h, inner_h - 20))
+        # Step 5: 呼吸空间 +5%
+        ellipse_w = int(ellipse_w * 1.05)
+        ellipse_h = int(ellipse_h * 1.05)
 
-    # 归一化
-    w_norm = ellipse_w / max(inner_w, 1)
-    h_norm = ellipse_h / max(inner_h, 1)
+        # Step 6: 最小/最大约束
+        ellipse_w = max(100, min(ellipse_w, inner_w - 20))
+        ellipse_h = max(60, min(ellipse_h, inner_h - 20))
 
-    return w_norm, h_norm, base_font
+        # Step 7: 归一化并检查是否适配面板
+        w_norm = ellipse_w / max(inner_w, 1)
+        h_norm = ellipse_h / max(inner_h, 1)
+
+        if h_norm <= max_bubble_h_norm and w_norm <= max_bubble_w_norm:
+            return w_norm, h_norm, current_font
+
+        # 不适配 → 缩小 2pt 重试
+        current_font -= 2
+
+    # 兜底：即使最小字号仍然超出，也返回最小字号的尺寸
+    # 渲染层 _draw_bubble_text 会在气泡底边裁剪超出的文本
+    return w_norm, h_norm, current_font
 
 
 # ---------------------------------------------------------------------------
@@ -592,9 +597,9 @@ def smart_bubble_position(
             _label, ax_ratio, ay_ratio, tail = _CORNER_CANDIDATES[idx]
             bx = panel_bbox.x + panel_bbox.width * ax_ratio
             by = panel_bbox.y + panel_bbox.height * ay_ratio
-            # 宽松钳制：允许气泡出框
-            bx = max(-bubble_w * 0.5, min(bx, 1.0 - bubble_w * 0.5))
-            by = max(-bubble_h * 0.5, min(by, 1.0 - bubble_h * 0.5))
+            # 严格钳制：气泡不得超出面板 bbox
+            bx = max(panel_bbox.x, min(bx, panel_bbox.x + panel_bbox.width - bubble_w))
+            by = max(panel_bbox.y, min(by, panel_bbox.y + panel_bbox.height - bubble_h))
             return bx, by, tail
 
         # 2b. 正常情况 — 5×5 网格评分
@@ -618,9 +623,9 @@ def smart_bubble_position(
             best_bx = panel_bbox.x + panel_bbox.width * ax_ratio
             best_by = panel_bbox.y + panel_bbox.height * ay_ratio
 
-        # 宽松钳制：仅防气泡完全跑出页面，不阻止合理的面板边缘出框
-        best_bx = max(-bubble_w * 0.5, min(best_bx, 1.0 - bubble_w * 0.5))
-        best_by = max(-bubble_h * 0.5, min(best_by, 1.0 - bubble_h * 0.5))
+        # 严格钳制：气泡不得超出面板 bbox
+        best_bx = max(panel_bbox.x, min(best_bx, panel_bbox.x + panel_bbox.width - bubble_w))
+        best_by = max(panel_bbox.y, min(best_by, panel_bbox.y + panel_bbox.height - bubble_h))
 
         best_tail = _derive_tail_direction(
             best_bx + bubble_w / 2, best_by + bubble_h / 2, panel_bbox,
@@ -639,9 +644,9 @@ def smart_bubble_position(
     _label, ax_ratio, ay_ratio, tail = candidates[idx]
     bx = panel_bbox.x + panel_bbox.width * ax_ratio
     by = panel_bbox.y + panel_bbox.height * ay_ratio
-    # 宽松钳制：允许气泡出框
-    bx = max(-bubble_w * 0.5, min(bx, 1.0 - bubble_w * 0.5))
-    by = max(-bubble_h * 0.5, min(by, 1.0 - bubble_h * 0.5))
+    # 严格钳制：气泡不得超出面板 bbox
+    bx = max(panel_bbox.x, min(bx, panel_bbox.x + panel_bbox.width - bubble_w))
+    by = max(panel_bbox.y, min(by, panel_bbox.y + panel_bbox.height - bubble_h))
     return bx, by, tail
 
 
