@@ -280,24 +280,142 @@ def load_agent_checkpoint(
 def load_latest_state(project_id: str) -> ComicState | None:
     """从最新的 checkpoint 重建完整 ComicState。
 
-    按执行顺序逆序查找，返回第一个存在 checkpoint 的 state_snapshot。
+    按执行顺序逆序查找最新的 state_snapshot 作为基底，
+    然后遍历所有 checkpoint，将手动修改过的 output.json 应用到 state 中。
+
     如果没有任何 checkpoint，返回 None。
     """
+    # 1. 找到最新的 state_snapshot 作为基底
+    base_snapshot: dict | None = None
+    latest_agent: str = ""
     for agent_name in reversed(_EXECUTION_ORDER):
         cp = load_agent_checkpoint(project_id, agent_name)
         if cp and cp["state_snapshot"]:
-            snapshot = cp["state_snapshot"]
-            # 用 output.json 的最新内容覆盖 snapshot 中对应字段
-            # （处理手动编辑 output.json 的情况）
+            base_snapshot = cp["state_snapshot"]
+            latest_agent = agent_name
+            break
+
+    if base_snapshot is None:
+        return None
+
+    # 2. 遍历所有 checkpoint，应用手动修改过的 output.json
+    for agent_name in _EXECUTION_ORDER:
+        cp_dir = get_checkpoint_dir(project_id, agent_name)
+        if not cp_dir.exists():
+            continue
+
+        output = _read_json(cp_dir / "output.json")
+        metadata = _read_json(cp_dir / "metadata.json")
+        if not output or not metadata:
+            continue
+
+        # 检查是否被手动修改（或始终应用最新 output 覆盖 snapshot 中的旧数据）
+        output_key = AGENT_CHECKPOINTS[agent_name]["output_key"]
+        if agent_name == "layout":
+            base_snapshot["final_pages"] = output.get("final_pages", [])
+            base_snapshot["exports"] = output.get("exports", [])
+        else:
+            base_snapshot[output_key] = output
+
+    return ComicState(**base_snapshot)  # type: ignore[arg-type]
+
+
+def load_state_for_resume(
+    project_id: str, resume_agent: str
+) -> ComicState | None:
+    """加载适合从指定 agent 续跑的状态。
+
+    策略:
+    1. 以 resume_agent 之前一个 checkpoint 的 state_snapshot 为基底
+       （如果 resume_agent 是第一个 agent，使用它的 state_snapshot）
+    2. 应用 resume_agent 的 output.json（可能已被手动修改）
+    3. 清除 resume_agent 及之后所有 agent 的输出字段
+
+    例如 resume_agent="bubble":
+      - 基底: 04_storyboard 的 state_snapshot
+      - 应用: 04_storyboard 的 output.json（含手动修改的台词）
+      - 清除: bubble_placements, final_pages, exports
+
+    Args:
+        project_id: 项目 ID
+        resume_agent: 要恢复到的 agent 名称（"story"/"character"/.../"layout"）
+
+    Returns:
+        可用于续跑的 ComicState，如果 checkpoint 不存在则返回 None
+    """
+    # 确定基底 checkpoint（resume_agent 的前一个）
+    resume_idx = _EXECUTION_ORDER.index(resume_agent) if resume_agent in _EXECUTION_ORDER else 0
+    base_agent = _EXECUTION_ORDER[resume_idx - 1] if resume_idx > 0 else resume_agent
+
+    # 加载基底 snapshot
+    cp = load_agent_checkpoint(project_id, base_agent)
+    if not cp or not cp["state_snapshot"]:
+        return None
+
+    snapshot = cp["state_snapshot"]
+
+    # 如果基底不是 resume_agent 本身，则应用基底 agent 的 output.json（含手动修改）
+    if base_agent != resume_agent:
+        output_key = AGENT_CHECKPOINTS[base_agent]["output_key"]
+        if base_agent == "layout":
+            snapshot["final_pages"] = cp["output"].get("final_pages", [])
+            snapshot["exports"] = cp["output"].get("exports", [])
+        else:
+            snapshot[output_key] = cp["output"]
+
+    # 如果 resume_agent 与基底不同（即从非第一个 agent 续跑），
+    # 也需要加载 resume_agent 之前的其他 checkpoint 的 output.json
+    for agent_name in _EXECUTION_ORDER[:resume_idx]:
+        if agent_name == base_agent:
+            continue  # 已经处理过
+        agent_cp = load_agent_checkpoint(project_id, agent_name)
+        if agent_cp and agent_cp["output"]:
             output_key = AGENT_CHECKPOINTS[agent_name]["output_key"]
             if agent_name == "layout":
-                snapshot["final_pages"] = cp["output"].get("final_pages", [])
-                snapshot["exports"] = cp["output"].get("exports", [])
+                snapshot["final_pages"] = agent_cp["output"].get("final_pages", [])
+                snapshot["exports"] = agent_cp["output"].get("exports", [])
             else:
-                snapshot[output_key] = cp["output"]
-            return ComicState(**snapshot)  # type: ignore[arg-type]
+                snapshot[output_key] = agent_cp["output"]
 
-    return None
+    # 清除 resume_agent 及之后的输出字段
+    _clear_agent_outputs(snapshot, resume_agent)
+
+    snapshot["current_phase"] = base_agent
+    return ComicState(**snapshot)  # type: ignore[arg-type]
+
+
+def _clear_agent_outputs(state: dict, from_agent: str) -> None:
+    """清除指定 agent 及之后所有 agent 的输出字段。"""
+    clear_keys: dict[str, list[str]] = {
+        "story": ["developed_story", "narrative_structure", "structured_script",
+                   "emotion_curve", "character_db", "reference_chain",
+                   "storyboard_plan", "layout_grids", "panel_images",
+                   "generation_metadata", "bubble_placements", "final_pages", "exports"],
+        "character": ["character_db", "reference_chain", "structured_script",
+                      "emotion_curve", "storyboard_plan", "layout_grids",
+                      "panel_images", "generation_metadata",
+                      "bubble_placements", "final_pages", "exports"],
+        "script": ["structured_script", "emotion_curve", "storyboard_plan",
+                    "layout_grids", "panel_images", "generation_metadata",
+                    "bubble_placements", "final_pages", "exports"],
+        "storyboard": ["storyboard_plan", "layout_grids", "panel_images",
+                       "generation_metadata", "bubble_placements",
+                       "final_pages", "exports"],
+        "image": ["panel_images", "generation_metadata",
+                  "bubble_placements", "final_pages", "exports"],
+        "bubble": ["bubble_placements", "final_pages", "exports"],
+        "layout": ["final_pages", "exports"],
+    }
+
+    keys = clear_keys.get(from_agent, [])
+    for k in keys:
+        if k in state:
+            if isinstance(state.get(k), list):
+                state[k] = []
+            elif isinstance(state.get(k), dict):
+                state[k] = {}
+            else:
+                state[k] = None
 
 
 def load_all_checkpoints(project_id: str) -> list[dict[str, Any]]:
