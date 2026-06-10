@@ -350,11 +350,80 @@ def compose_page(
 # Single-panel bubble rendering — 在单张面板图像上直接绘制气泡
 # ---------------------------------------------------------------------------
 
+_GRID_SIZE = 5
+
+
+def _draw_search_grid(
+    draw: ImageDraw.ImageDraw,
+    bp,       # BubblePlacement
+    bbox_x: float, bbox_y: float, bbox_w: float, bbox_h: float,
+    img_w: int, img_h: int,
+) -> None:
+    """在面板图像上用蓝色线条绘制 5×5 搜索网格。
+
+    与 bubbles._build_grid_candidates() 使用完全相同的 margin/clamp 逻辑，
+    在面板像素空间绘制 5 条垂直线 + 5 条水平线。
+    网格线通过 25 个候选气泡中心点，覆盖从 (x_min, y_min) 到 (x_max, y_max) 的区域。
+    """
+    bubble_w = bp.w
+    bubble_h = bp.h
+
+    margin_x = bubble_w / 2 + 0.02
+    margin_y = bubble_h / 2 + 0.02
+
+    x_min = bbox_x + margin_x
+    x_max = bbox_x + bbox_w - margin_x
+    y_min = bbox_y + margin_y
+    y_max = bbox_y + bbox_h - margin_y
+
+    # 钳制：防止气泡尺寸过大导致可用区域为负（与 _build_grid_candidates 一致）
+    if x_min >= x_max:
+        x_mid = bbox_x + bbox_w / 2
+        x_min = x_mid - 0.01
+        x_max = x_mid + 0.01
+    if y_min >= y_max:
+        y_mid = bbox_y + bbox_h / 2
+        y_min = y_mid - 0.01
+        y_max = y_mid + 0.01
+
+    for i in range(_GRID_SIZE):
+        # 候选中心点在页面归一化空间中的坐标
+        gx = x_min + (x_max - x_min) * i / (_GRID_SIZE - 1)
+        gy = y_min + (y_max - y_min) * i / (_GRID_SIZE - 1)
+
+        # 转换到面板像素坐标
+        vx_px = int((gx - bbox_x) / bbox_w * img_w)
+        hy_px = int((gy - bbox_y) / bbox_h * img_h)
+
+        # 垂直线：y 范围从 y_min 到 y_max
+        vy_start = int((y_min - bbox_y) / bbox_h * img_h)
+        vy_end = int((y_max - bbox_y) / bbox_h * img_h)
+        vy_start = max(0, vy_start)
+        vy_end = min(img_h, vy_end)
+        if 0 <= vx_px < img_w:
+            draw.line(
+                [(vx_px, vy_start), (vx_px, vy_end)],
+                fill=(0, 120, 255), width=2,
+            )
+
+        # 水平线：x 范围从 x_min 到 x_max
+        hx_start = int((x_min - bbox_x) / bbox_w * img_w)
+        hx_end = int((x_max - bbox_x) / bbox_w * img_w)
+        hx_start = max(0, hx_start)
+        hx_end = min(img_w, hx_end)
+        if 0 <= hy_px < img_h:
+            draw.line(
+                [(hx_start, hy_px), (hx_end, hy_px)],
+                fill=(0, 120, 255), width=2,
+            )
+
 
 def render_bubbles_on_panel_image(
     panel_img: Image.Image,
     panel_bbox,          # BoundingBox — 面板在页面内区的位置（归一化 0-1）
     bubbles: list,       # list[BubblePlacement] — 该面板的气泡（页面归一化坐标）
+    faces: list | None = None,  # list[FaceRegion] — 该面板检测到的人脸
+    show_debug_boxes: bool = True,
 ) -> Image.Image:
     """在单张面板图像上直接绘制台词气泡，返回修改后的图像。
 
@@ -370,6 +439,10 @@ def render_bubbles_on_panel_image(
         面板在页面内区的位置（x, y, width, height 均为 0-1 归一化值）。
     bubbles : list[BubblePlacement]
         该面板的气泡放置结果（坐标相对于页面内区，0-1 归一化）。
+    faces : list[FaceRegion] or None
+        该面板 YOLO 检测到的人脸列表（坐标相对于面板图像，0-1 归一化）。
+    show_debug_boxes : bool
+        是否绘制调试框（绿色=气泡外框，红色=人脸检测框，蓝色=5×5搜索网格）。
 
     返回
     -------
@@ -426,6 +499,31 @@ def render_bubbles_on_panel_image(
             _draw_narration(draw, body, bp, getattr(bp, 'font_size_pt', 14))
         else:
             _draw_speech(draw, body, bp, getattr(bp, 'font_size_pt', 14))
+
+        # 调试：绿色外框标记气泡的边界矩形（放置算法使用的 bbox）
+        if show_debug_boxes:
+            draw.rectangle(body, outline=(0, 255, 0), width=3)
+
+            # 调试：蓝色线条标记 5×5 搜索网格（与 _build_grid_candidates 逻辑一致）
+            _draw_search_grid(draw, bp, bbox_x, bbox_y, bbox_w, bbox_h, img_w, img_h)
+
+    # 调试：红色外框标记 YOLO 检测到的人脸区域
+    if show_debug_boxes and faces:
+        for face in faces:
+            fx = int(face.x * img_w)
+            fy = int(face.y * img_h)
+            fw = int(face.w * img_w)
+            fh = int(face.h * img_h)
+            fx = max(0, fx)
+            fy = max(0, fy)
+            fw = min(fw, img_w - fx)
+            fh = min(fh, img_h - fy)
+            if fw > 0 and fh > 0:
+                draw.rectangle(
+                    (fx, fy, fx + fw, fy + fh),
+                    outline=(255, 0, 0),
+                    width=3,
+                )
 
     return panel_img
 

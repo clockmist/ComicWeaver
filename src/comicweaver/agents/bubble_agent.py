@@ -242,6 +242,7 @@ class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
                     img = Image.open(img_path)
                     bubbled = render_bubbles_on_panel_image(
                         img, bbox, panel_bubbles_list,
+                        faces=faces_by_panel.get(pid, []),
                     )
 
                     # 保存到同目录，加 _bubbled 后缀
@@ -638,6 +639,7 @@ class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
         target_panel_ids: set[str],
         all_placements: dict[str, list[BubblePlacementResult]],
         panel_bbox_map: dict[str, object],
+        faces_by_panel: dict[str, list[FaceRegion]] | None = None,
     ) -> dict[str, str]:
         """重新渲染受影响面板的气泡预览图。
 
@@ -688,6 +690,7 @@ class BubbleAgent(BaseAgent[BubbleInput, BubbleOutput]):
                         img = Image.open(img_path)
                         bubbled = render_bubbles_on_panel_image(
                             img, bbox, panel_bubbles_list,
+                            faces=faces_by_panel.get(pid, []) if faces_by_panel else [],
                         )
                         out_path = Path(img_path).parent / f"{pid}_bubbled.png"
                         bubbled.save(str(out_path))
