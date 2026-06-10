@@ -6,12 +6,27 @@ import os
 
 
 def _gradio_img_src(file_path: str) -> str:
-    """将绝对/相对文件路径转为 Gradio 可用的 img src URL。"""
+    """将绝对/相对文件路径转为 Gradio 可用的 img src URL。
+
+    自动添加文件修改时间作为 cache-busting 参数，
+    确保重新生成后的图片不会被浏览器缓存。
+    """
+    fp = str(file_path)
     try:
-        rel = os.path.relpath(str(file_path), os.getcwd())
+        rel = os.path.relpath(fp, os.getcwd())
     except (ValueError, OSError):
-        rel = str(file_path)
-    return rel.replace("\\", "/")
+        rel = fp
+
+    safe = rel.replace("\\", "/")
+
+    # 添加 cache-busting 参数：文件修改时间（毫秒精度）
+    try:
+        mtime_ms = int(os.path.getmtime(fp) * 1000)
+        safe = f"{safe}?t={mtime_ms}"
+    except (OSError, TypeError):
+        pass
+
+    return safe
 
 
 def _preview_thumbnail(path: str, alt: str) -> str:
