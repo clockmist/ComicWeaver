@@ -63,7 +63,10 @@ def list_projects_cards() -> str:
 
 
 def open_project_by_id(project_id: str) -> tuple[str, str, str, str, str, str, dict]:
-    """通过项目 ID 字符串打开已保存项目。"""
+    """通过项目 ID 字符串打开已保存项目。
+
+    v3.0: 自动检测并迁移 v1 格式项目到 v2 checkpoint 格式。
+    """
     from comicweaver.storage import load_project, project_to_state
 
     pid = (project_id or "").strip()
@@ -85,6 +88,12 @@ def open_project_by_id(project_id: str) -> tuple[str, str, str, str, str, str, d
             "init",
             gr.update(),
         )
+
+    # v3.0: 自动迁移 v1 项目
+    if project.format_version < 2 and project.state:
+        from comicweaver.storage import migrate_legacy_project
+        migrate_legacy_project(pid)
+        project = load_project(pid) or project
 
     state = project_to_state(project)
     SESSION.reset()
@@ -145,7 +154,29 @@ def save_current_project() -> str:
     if SESSION.state is None:
         return "❌ 没有可保存的项目，请先创建项目"
     try:
+        from comicweaver.storage import list_project_checkpoints
+
         proj = state_to_project(SESSION.state)
+        project_id = SESSION.state.get("project_id", "")
+        if project_id:
+            proj.checkpoints_completed = list_project_checkpoints(project_id)
+            current_phase = SESSION.state.get("current_phase", "init")
+            # 将 current_phase 映射到文件夹名
+            _phase_to_folder: dict[str, str] = {
+                "story": "01_story", "character": "02_character",
+                "script": "03_script", "storyboard": "04_storyboard",
+                "image": "05_image", "bubble": "06_bubble", "layout": "07_layout",
+            }
+            proj.latest_checkpoint = _phase_to_folder.get(current_phase, "")
+            proj.state_summary = {
+                "title": SESSION.state.get("title", ""),
+                "user_input": SESSION.state.get("user_input", ""),
+                "current_phase": current_phase,
+                "interaction_mode": SESSION.state.get("interaction_mode", "semi_auto"),
+                "creation_mode": SESSION.state.get("creation_mode", "simple"),
+                "style_preset": SESSION.state.get("style_preset", "manga"),
+                "target_pages": SESSION.state.get("target_pages", 4),
+            }
         storage_save_project(proj)
         return f"✅ 项目已保存: {proj.title} ({proj.project_id})"
     except Exception as exc:

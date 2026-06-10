@@ -590,7 +590,12 @@ def summarize_bubble_output(output: dict) -> dict:
 # ============================================================================
 
 
-def write_dev_log_to_file(dev_entries: list[dict], project_dir: str | Path) -> Path | None:
+def write_dev_log_to_file(
+    dev_entries: list[dict],
+    project_dir: str | Path,
+    mode: str = "write",
+    agent_name: str = "",
+) -> Path | None:
     """将开发者日志条目写入项目目录下的 dev_log.txt 文件。
 
     每条日志格式化为一行带中文标注的可读文本，按 Agent 分段。
@@ -599,6 +604,8 @@ def write_dev_log_to_file(dev_entries: list[dict], project_dir: str | Path) -> P
     Args:
         dev_entries: DevLogEntry.to_dict() 的列表
         project_dir: 项目目录路径
+        mode: "write"(全量写入,默认) 或 "append_agent"(增量追加单个agent)
+        agent_name: mode="append_agent" 时指定 agent 名称
 
     Returns:
         写入的文件路径，如果列表为空则返回 None
@@ -610,6 +617,16 @@ def write_dev_log_to_file(dev_entries: list[dict], project_dir: str | Path) -> P
     project_dir.mkdir(parents=True, exist_ok=True)
     log_path = project_dir / "dev_log.txt"
 
+    if mode == "append_agent":
+        _append_agent_log_section(log_path, dev_entries, agent_name)
+    else:
+        _write_full_dev_log(log_path, dev_entries)
+
+    return log_path
+
+
+def _write_full_dev_log(log_path: Path, dev_entries: list[dict]) -> None:
+    """全量写入 dev_log.txt（mode="write"）。"""
     lines: list[str] = []
     lines.append("=" * 80)
     lines.append("  ComicWeaver 开发者日志 — 按 Agent 分段展示")
@@ -618,9 +635,8 @@ def write_dev_log_to_file(dev_entries: list[dict], project_dir: str | Path) -> P
     lines.append("=" * 80)
     lines.append("")
 
-    # 按 Agent 分组
     last_agent = ""
-    for i, e in enumerate(dev_entries):
+    for e in dev_entries:
         agent = e.get("agent", "workflow")
         if agent != last_agent:
             agent_cn = _agent_label(agent)
@@ -630,31 +646,7 @@ def write_dev_log_to_file(dev_entries: list[dict], project_dir: str | Path) -> P
             lines.append(f"{'─' * 60}")
             last_agent = agent
 
-        ts = time.strftime("%H:%M:%S", time.localtime(e.get("timestamp", time.time())))
-        cat_cn = _category_label(e.get("category", ""))
-        lvl_cn = _level_label(e.get("level", "info"))
-        msg = e.get("message", "")
-
-        line = f"  [{ts}] [{lvl_cn}] {cat_cn}  {msg}"
-
-        dur = e.get("duration_ms", 0)
-        if dur > 0:
-            dur_str = f"{dur:.0f}ms" if dur < 1000 else f"{dur / 1000:.1f}s"
-            line += f"  (耗时: {dur_str})"
-
-        lines.append(line)
-
-        # 重要数据缩进展示
-        data = e.get("data", {})
-        if data:
-            for k in ("page_count", "panel_count", "character_count",
-                      "total_bubbles", "decision", "score", "status"):
-                if k in data:
-                    v = data[k]
-                    if isinstance(v, float):
-                        lines.append(f"        ↳ {k} = {v:.2f}")
-                    else:
-                        lines.append(f"        ↳ {k} = {v}")
+        lines.append(_format_log_entry_line(e))
 
     lines.append("")
     lines.append("=" * 80)
@@ -662,4 +654,62 @@ def write_dev_log_to_file(dev_entries: list[dict], project_dir: str | Path) -> P
     lines.append("=" * 80)
 
     log_path.write_text("\n".join(lines), encoding="utf-8")
-    return log_path
+
+
+def _append_agent_log_section(
+    log_path: Path, dev_entries: list[dict], agent_name: str
+) -> None:
+    """增量追加单个 agent 的日志段落到 dev_log.txt。
+
+    如果文件不存在，先写入头部。
+    """
+    agent_cn = _agent_label(agent_name)
+
+    lines: list[str] = []
+
+    if not log_path.exists():
+        lines.append("=" * 80)
+        lines.append("  ComicWeaver 开发者日志 — 按 Agent 分段展示")
+        lines.append(f"  生成时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+        lines.append("=" * 80)
+        lines.append("")
+
+    lines.append("")
+    lines.append(f"{'─' * 60}")
+    lines.append(f"  【{agent_cn}】({agent_name}) 的日志")
+    lines.append(f"{'─' * 60}")
+
+    for e in dev_entries:
+        lines.append(_format_log_entry_line(e))
+
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def _format_log_entry_line(e: dict) -> str:
+    """将单条日志条目格式化为一行可读文本。"""
+    ts = time.strftime("%H:%M:%S", time.localtime(e.get("timestamp", time.time())))
+    cat_cn = _category_label(e.get("category", ""))
+    lvl_cn = _level_label(e.get("level", "info"))
+    msg = e.get("message", "")
+
+    line = f"  [{ts}] [{lvl_cn}] {cat_cn}  {msg}"
+
+    dur = e.get("duration_ms", 0)
+    if dur > 0:
+        dur_str = f"{dur:.0f}ms" if dur < 1000 else f"{dur / 1000:.1f}s"
+        line += f"  (耗时: {dur_str})"
+
+    # 重要数据缩进展示
+    data = e.get("data", {})
+    if data:
+        for k in ("page_count", "panel_count", "character_count",
+                  "total_bubbles", "decision", "score", "status"):
+            if k in data:
+                v = data[k]
+                if isinstance(v, float):
+                    return line + f"\n        ↳ {k} = {v:.2f}"
+                else:
+                    return line + f"\n        ↳ {k} = {v}"
+
+    return line

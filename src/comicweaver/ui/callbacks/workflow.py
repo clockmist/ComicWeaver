@@ -186,7 +186,27 @@ async def _consume_workflow(session: Session) -> None:
                         "timestamp": msg.timestamp,
                     })
                     if session.state:
+                        from comicweaver.storage import list_project_checkpoints
                         proj = state_to_project(session.state)
+                        project_id = session.state.get("project_id", "")
+                        if project_id:
+                            proj.checkpoints_completed = list_project_checkpoints(project_id)
+                            current_phase = session.state.get("current_phase", "layout")
+                            _wf_phase_to_folder: dict[str, str] = {
+                                "story": "01_story", "character": "02_character",
+                                "script": "03_script", "storyboard": "04_storyboard",
+                                "image": "05_image", "bubble": "06_bubble", "layout": "07_layout",
+                            }
+                            proj.latest_checkpoint = _wf_phase_to_folder.get(current_phase, "")
+                            proj.state_summary = {
+                                "title": session.state.get("title", ""),
+                                "user_input": session.state.get("user_input", ""),
+                                "current_phase": current_phase,
+                                "interaction_mode": session.state.get("interaction_mode", "semi_auto"),
+                                "creation_mode": session.state.get("creation_mode", "simple"),
+                                "style_preset": session.state.get("style_preset", "manga"),
+                                "target_pages": session.state.get("target_pages", 4),
+                            }
                         save_project(proj)
                         # 同时持久化开发者日志为可读文本文件
                         if session.dev_log:

@@ -51,7 +51,13 @@ from comicweaver.core import (
     StoryOutput,
     StreamEventType,
 )
-from comicweaver.storage import save_project, state_to_project
+from comicweaver.storage import (
+    AGENT_CHECKPOINTS,
+    list_project_checkpoints,
+    save_agent_checkpoint,
+    save_project,
+    state_to_project,
+)
 from comicweaver.utils.logging import (
     log_agent_error,
     log_agent_input,
@@ -221,7 +227,7 @@ class ComicWorkflow:
                 raise
 
             # --- Checkpoint & auto-save ---
-            self._save_checkpoint(state)
+            self._save_checkpoint(state, "story")
             if not should_pause(state, "after_story"):
                 break
             writer(CheckpointSignal(
@@ -300,7 +306,7 @@ class ComicWorkflow:
                 raise
 
             # --- Checkpoint & auto-save ---
-            self._save_checkpoint(state)
+            self._save_checkpoint(state, "script")
             if not should_pause(state, "after_script"):
                 break
             writer(CheckpointSignal(
@@ -388,7 +394,7 @@ class ComicWorkflow:
                 raise
 
             # --- Checkpoint & auto-save ---
-            self._save_checkpoint(state)
+            self._save_checkpoint(state, "character")
             if not should_pause(state, "after_character"):
                 break
             writer(CheckpointSignal(
@@ -487,7 +493,7 @@ class ComicWorkflow:
                 raise
 
             # --- Checkpoint & auto-save ---
-            self._save_checkpoint(state)
+            self._save_checkpoint(state, "storyboard")
             if not should_pause(state, "after_storyboard"):
                 break
             writer(CheckpointSignal(
@@ -684,7 +690,7 @@ class ComicWorkflow:
             writer(log_performance("image_agent", elapsed, status=f"{len(all_panel_images)}/{total_panels} panels"))
 
             # --- Checkpoint & auto-save ---
-            self._save_checkpoint(state)
+            self._save_checkpoint(state, "image")
             if not should_pause(state, "after_image"):
                 break
             writer(CheckpointSignal(
@@ -768,7 +774,7 @@ class ComicWorkflow:
                 raise
 
             # --- Checkpoint & auto-save ---
-            self._save_checkpoint(state)
+            self._save_checkpoint(state, "bubble")
             if not should_pause(state, "after_bubble"):
                 break
             writer(CheckpointSignal(
@@ -852,7 +858,7 @@ class ComicWorkflow:
                 raise
 
             # --- Checkpoint & auto-save ---
-            self._save_checkpoint(state)
+            self._save_checkpoint(state, "layout")
             if not should_pause(state, "after_layout"):
                 break
             writer(CheckpointSignal(
@@ -965,10 +971,23 @@ class ComicWorkflow:
     # Checkpoint / Resume 机制
     # ------------------------------------------------------------------
 
-    def _save_checkpoint(self, state: ComicState) -> None:
-        """在每个 Agent 完成后自动保存项目状态。"""
+    def _save_checkpoint(self, state: ComicState, agent_name: str = "") -> None:
+        """在每个 Agent 完成后自动保存项目状态。
+
+        v3.0: 保存 agent 级 checkpoint（输出 + 输入 + 状态快照 + 元信息），
+        同时更新精简版 project.json。
+        """
         try:
+            project_id = state.get("project_id", "")
+            if project_id and agent_name:
+                # v3.0: agent 级 checkpoint
+                save_agent_checkpoint(project_id, agent_name, state)
+            # 更新 project.json（轻量元信息）
             proj = state_to_project(state)
+            if agent_name and agent_name in AGENT_CHECKPOINTS:
+                proj.latest_checkpoint = AGENT_CHECKPOINTS[agent_name]["folder"]
+                proj.checkpoints_completed = list_project_checkpoints(project_id)
+                proj.state_summary = _build_state_summary(state)
             save_project(proj)
         except Exception:
             pass  # 保存失败不应中断工作流
@@ -1146,6 +1165,31 @@ def _extract_emotion_curve(script_content: dict) -> list[float]:
             if intensity is not None:
                 curve.append(float(intensity))
     return curve
+
+
+def _build_state_summary(state: ComicState) -> dict:
+    """从 ComicState 构建轻量摘要（写入 project.json 的 state_summary 字段）。"""
+    script = state.get("structured_script", {})
+    pages = script.get("pages", []) if isinstance(script, dict) else []
+    all_panels = []
+    for p in pages:
+        all_panels.extend(p.get("panels", []) if isinstance(p, dict) else [])
+
+    cdb = state.get("character_db", {})
+    characters = cdb.get("characters", {}) if isinstance(cdb, dict) else {}
+
+    return {
+        "title": state.get("title", ""),
+        "user_input": state.get("user_input", ""),
+        "current_phase": state.get("current_phase", "init"),
+        "page_count": len(pages),
+        "panel_count": len(all_panels),
+        "character_count": len(characters),
+        "interaction_mode": state.get("interaction_mode", "semi_auto"),
+        "creation_mode": state.get("creation_mode", "simple"),
+        "style_preset": state.get("style_preset", "manga"),
+        "target_pages": state.get("target_pages", 4),
+    }
 
 
 def _round_to_multiple(value: float, multiple: int) -> int:

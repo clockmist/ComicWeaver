@@ -122,9 +122,17 @@ def make_initial_state(
 
 
 class ComicProject(BaseModel):
-    """项目持久化模型 - 用于保存与恢复。"""
+    """项目持久化模型 - 用于保存与恢复。
+
+    v2 (format_version=2): state 字段不再存储完整数据，而是通过
+    checkpoints/ 目录下的 agent 级快照重建。
+    """
     project_id: str
     title: str = "Untitled Project"
+    format_version: int = 1
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
     state: dict = Field(default_factory=dict)
+    latest_checkpoint: str = ""
+    checkpoints_completed: list[str] = Field(default_factory=list)
+    state_summary: dict = Field(default_factory=dict)
